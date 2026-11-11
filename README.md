@@ -1,155 +1,160 @@
 # CNVDetect
 
-**Hedefli gen paneli sekanslama verisinden kopya sayısı değişikliği (CNV) tespiti ve sınıflandırması için sihirbaz akışlı analiz platformu.**
+**A wizard-driven platform for detecting and classifying copy number variants (CNVs) from targeted gene panel sequencing.**
 
-FASTQ dosyalarından başlayıp hizalama, iki bağımsız CNV çağırıcı (CNVkit + ExomeDepth), konsensüs ve ACMG tabanlı sınıflandırmaya (ClassifyCNV) kadar tüm süreci tek bir arayüzden yürütür. Eşleşmiş normal örnek gerektirmez. Arayüz Türkçe ve İngilizce destekler.
+CNVDetect runs the whole workflow from a single interface:
+- alignment of FASTQ files
+- two independent CNV callers (CNVkit + ExomeDepth) and a consensus callset
+- ACMG-based classification with ClassifyCNV
 
----
-
-## İçindekiler
-
-- [Özellikler](#özellikler)
-- [Nasıl çalışır](#nasıl-çalışır)
-- [Gereksinimler](#gereksinimler)
-- [Kurulum](#kurulum)
-- [Çalıştırma](#çalıştırma)
-- [Kullanım](#kullanım)
-- [Çıktılar](#çıktılar)
-- [Yapılandırma](#yapılandırma)
-- [Pipeline'ı komut satırından çalıştırma](#pipelineı-komut-satırından-çalıştırma)
-- [Proje yapısı](#proje-yapısı)
-- [Sorun giderme](#sorun-giderme)
+No matched normal samples are required. The interface is available in English and Turkish.
 
 ---
 
-## Özellikler
+## Contents
 
-- **Panel / BED oluşturma**
-  - Kurumsal panel (141 gen, 1929 hedef bölge, hg19)
-  - Hazır klinik paneller ve gen adıyla özel panel; padding ayarlı otomatik BED üretimi (hg19 / hg38)
-  - Kendi BED dosyanızı yükleme
-- **Cinsiyet stratifikasyonu** — Erkek ve kadın örnekler ayrı analiz edilir (kadınlarda chrY, ortak analizde X/Y hariç). FASTQ klasöründen örnek adları otomatik algılanır.
-- **Analiz yürütme**
-  - FASTQ dosyalarını ve örnek sayısını gösteren klasör seçici
-  - Canlı ilerleme takibi (adım adım, erkek/kadın ayrı)
-  - Teknik log görünümü
-  - Analizi güvenle durdurma (tüm alt süreçler sonlandırılır)
-- **Konsensüs CNV çağrısı** — CNVkit (flat reference) ve ExomeDepth (kohort referansı) sonuçlarının kesişimi yüksek güvenli çağrı olarak raporlanır.
-- **Otomatik sınıflandırma** — ClassifyCNV ile ACMG kriterlerine göre (Pathogenic / VUS / Benign …). Sonuçlar tek bir Excel raporunda birleştirilir.
-- **Bulgular ekranı**
-  - Filtrelenebilir / sıralanabilir tablo
-  - Kromozom, sınıf ve örnek dağılımı grafikleri
-  - TSV dışa aktarma ve not alanı
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Running](#running)
+- [Usage](#usage)
+- [Outputs](#outputs)
+- [Configuration](#configuration)
+- [Running the pipeline from the command line](#running-the-pipeline-from-the-command-line)
+- [Project structure](#project-structure)
+- [Troubleshooting](#troubleshooting)
 
-## Nasıl çalışır
+---
+
+## Features
+
+- **Panel / BED builder**
+  - Institutional panel: 141 genes, 1,929 target regions, hg19
+  - Clinical preset panels, or a custom panel built from gene names, with automatic BED generation and adjustable padding (hg19 / hg38)
+  - Upload your own BED file
+- **Sex stratification** — male and female samples are analysed separately (chrY excluded for females; X/Y excluded in the combined analysis). Sample names are detected automatically from the FASTQ folder.
+- **Running the analysis**
+  - Folder picker that shows the FASTQ files and the number of samples in each folder
+  - Live, per-step progress, tracked separately for males and females
+  - Technical log view
+  - Safe stop: all child processes are terminated
+- **Consensus CNV calling** — calls made by both CNVkit (flat reference) and ExomeDepth (cohort reference) are reported as high-confidence.
+- **Automatic classification** — ClassifyCNV assigns ACMG classes (Pathogenic / VUS / Benign …). Results from all groups are merged into a single Excel report.
+- **Results view**
+  - Filterable, sortable table
+  - Charts by chromosome, classification and sample
+  - TSV export and a notes panel
+
+## How it works
 
 ```
-┌──────────────┐   HTTP / WebSocket   ┌──────────────────┐   bash   ┌───────────────────────────────┐
-│  Arayüz      │ ───────────────────▶ │  Backend         │ ───────▶ │  cnv_pipeline_last.sh         │
-│  React+Vite  │ ◀─────────────────── │  FastAPI :8765   │          │  BWA → Picard → CNVkit        │
-│  (Docker /   │   canlı log, durum   │  (WSL / Linux)   │          │        → ExomeDepth → Konsensüs│
+┌──────────────┐   HTTP / WebSocket   ┌──────────────────┐   bash   ┌────────────────────────────────┐
+│  Frontend    │ ───────────────────▶ │  Backend         │ ───────▶ │  cnv_pipeline_last.sh          │
+│  React+Vite  │ ◀─────────────────── │  FastAPI :8765   │          │  BWA → Picard → CNVkit         │
+│  (Docker /   │   live logs, status  │  (WSL / Linux)   │          │        → ExomeDepth → Consensus│
 │   Electron)  │                      └──────────────────┘          │  cnv_anotation.sh → ClassifyCNV│
-└──────────────┘                                                    └───────────────────────────────┘
+└──────────────┘                                                    └────────────────────────────────┘
 ```
 
-- **Backend** Linux (WSL) üzerinde çalışır; çünkü biyoinformatik araçlara ve FASTQ klasörlerine doğrudan erişmesi gerekir.
-- **Arayüz** üç şekilde çalışabilir: Docker'daki nginx (web), Vite geliştirme sunucusu ya da Electron masaüstü uygulaması.
+- The **backend** runs on Linux (or WSL), because it needs direct access to the bioinformatics tools and to the FASTQ folders.
+- The **frontend** can be served in three ways: by nginx in Docker (web), by the Vite dev server, or as an Electron desktop app.
 
-## Gereksinimler
+## Requirements
 
-| Bileşen | Not |
+| Component | Notes |
 |---|---|
-| Linux veya Windows + **WSL2** (Ubuntu) | Backend ve pipeline Linux'ta çalışır |
-| **Python 3.10+** | Backend için |
-| **conda** ortamı `cnv_pipeline` | İçinde: `bwa`, `samtools`, `picard`, `cnvkit`, `r-base` + Bioconductor `ExomeDepth`, `GenomicRanges` |
-| **ClassifyCNV** | `tools/ClassifyCNV/` (veya `~/ClassifyCNV/`) altına kurulmalı |
-| **Referans genom** | `reference/hg19.fasta` — BWA/samtools/Picard indeksleri yoksa ilk çalıştırmada otomatik oluşturulur |
-| **Node.js 18+** | Sadece arayüzü geliştirmek veya Electron için |
-| **Docker** | Sadece web arayüzünü Docker ile sunmak için |
+| Linux, or Windows + **WSL2** (Ubuntu) | The backend and the pipeline run on Linux |
+| **Python 3.10+** | For the backend |
+| **conda** environment `cnv_pipeline` | With `bwa`, `samtools`, `picard`, `cnvkit`, `r-base`, and the Bioconductor packages `ExomeDepth` and `GenomicRanges` |
+| **ClassifyCNV** | Installed under `tools/ClassifyCNV/` (or `~/ClassifyCNV/`) |
+| **Reference genome** | `reference/hg19.fasta`. Missing BWA/samtools/Picard indexes are built automatically on the first run. |
+| **Node.js 18+** | Only for frontend development or Electron |
+| **Docker** | Only for serving the web frontend with Docker |
 
-> Referans genom ve indeksleri (~8 GB) ile `tools/` klasörü boyutları nedeniyle depoya dahil değildir.
+> The reference genome with its indexes (~8 GB) and the `tools/` folder are not included in the repository because of their size.
 
-## Kurulum
+## Installation
 
 ```bash
-# 1. Depoyu klonlayın
+# 1. Clone the repository
 git clone https://github.com/kadersaribulak/CNVDetect.git
 cd CNVDetect
 
-# 2. Pipeline araçları için conda ortamı
+# 2. Create a conda environment with the pipeline tools
 conda create -n cnv_pipeline -c bioconda -c conda-forge \
     bwa samtools picard cnvkit r-base bioconductor-exomedepth bioconductor-genomicranges
 conda activate cnv_pipeline
 
-# 3. Backend bağımlılıkları (aynı ortamda)
+# 3. Install the backend dependencies (in the same environment)
 pip install -r backend/requirements.txt
 
-# 4. Referans genom
+# 4. Reference genome
 mkdir -p reference
-#   hg19.fasta dosyasını reference/ klasörüne koyun
+#   Place hg19.fasta in reference/
 
 # 5. ClassifyCNV
 git clone https://github.com/Genotek/ClassifyCNV.git tools/ClassifyCNV
-#   Kurulum ve kaynak dosyalar için ClassifyCNV'nin kendi README'sine bakın
+#   See ClassifyCNV's own README for setup and resource files
 
-# 6. (İsteğe bağlı) Tam gen koordinat veritabanını güncelleme
+# 6. (Optional) Refresh the full gene coordinate database
 python3 backend/download_genes.py
 ```
 
-Backend açılışta tüm yolları kontrol eder ve terminale `✓` / `✗` olarak yazar. Eksik bir bileşen varsa orada görünür.
+On startup the backend checks every configured path and prints `✓` or `✗` for each one, so missing components are easy to spot.
 
-## Çalıştırma
+## Running
 
-### Web (önerilen) — Backend WSL'de, arayüz Docker'da
+### Web (recommended): backend in WSL, frontend in Docker
 
 ```bash
-# Terminal 1 — Backend
+# Terminal 1: backend
 conda activate cnv_pipeline
 cd backend
 uvicorn main:app --host 0.0.0.0 --port 8765
 
-# Terminal 2 — Arayüz
+# Terminal 2: frontend
 sudo docker compose up -d --build
 ```
 
-Tarayıcıda **http://localhost:3001** adresini açın. nginx, API ve WebSocket isteklerini `host.docker.internal:8765` üzerinden backend'e yönlendirir.
+Open **http://localhost:3001** in your browser. nginx forwards API and WebSocket requests to the backend at `host.docker.internal:8765`.
 
-> ⚠️ `--host 0.0.0.0` backend'i ağa açar. Sadece güvenilir bir ağda kullanın. Backend, istemcinin göndereceği script yollarını kabul etmez; çalıştırılan tüm scriptler `config.json`'dan okunur.
+> ⚠️ `--host 0.0.0.0` exposes the backend to your network, so only use it on a trusted network. The backend never accepts script paths from the client: every script it runs is read from `config.json`.
 
-### Geliştirme modu (Vite + Electron)
+### Development mode (Vite + Electron)
 
 ```bash
-# Terminal 1 — Backend
+# Terminal 1: backend
 cd backend && uvicorn main:app --host 127.0.0.1 --port 8765
 
-# Terminal 2 — Arayüz
+# Terminal 2: frontend
 npm install
-npm run dev     # Vite (http://localhost:5173) + Electron penceresi
-npm run web     # Sadece tarayıcı için Vite
+npm run dev     # Vite (http://localhost:5173) + Electron window
+npm run web     # Vite only, for the browser
 ```
 
-Vite, `/api`, `/ws` ve `/health` isteklerini otomatik olarak `localhost:8765`'e yönlendirir.
+Vite proxies `/api`, `/ws` and `/health` to `localhost:8765` automatically.
 
-### Masaüstü paketi (Electron)
+### Desktop package (Electron)
 
 ```bash
-npm run build   # dist-electron/ altına AppImage / dmg / nsis üretir
+npm run build   # builds an AppImage / dmg / nsis installer into dist-electron/
 ```
 
-Paket backend'i ve pipeline'ı içerir; ancak hedef makinede Python, pipeline araçları, referans genom ve ClassifyCNV ayrıca kurulu olmalıdır.
+The package bundles the backend and the pipeline scripts. Python, the pipeline tools, the reference genome and ClassifyCNV must still be installed on the target machine.
 
-## Kullanım
+## Usage
 
-| Adım | Ne yapılır |
+| Step | What to do |
 |---|---|
-| **1. Panel Seçimi** | Genom sürümünü (hg19/hg38) seçin. Ardından kurumsal paneli kullanın, hazır bir klinik panel ekleyin, gen adı yazın veya BED yükleyin. Sağda BED önizlemesi görünür. |
-| **2. Hasta Örnekleri** | İsteğe bağlı cinsiyet stratifikasyonu. Örnek adları FASTQ klasöründen otomatik gelir; her örnek için Erkek/Kadın seçin veya TSV içe aktarın. |
-| **3. Analizi Başlat** | **FASTQ Klasörü** kutusuna tıklayıp FASTQ'ların bulunduğu klasörü seçin (dosya ve örnek sayısı gösterilir). Çıktı klasörü adını yazın, gerekirse thread sayısını ve "BAM dosyalarını sakla" seçeneğini ayarlayıp başlatın. Çıktı, FASTQ klasörüyle aynı üst klasöre yazılır. |
-| **4. Bulgular** | `*_consensus_cnvs.tsv` ve `CNV_Final_Summary_Report.tsv` dosyalarını yükleyin. CNV'ler örnek + kromozom + başlangıç + tip ile sınıflandırmayla eşleştirilir. |
+| **1. Panel** | Choose the genome build (hg19/hg38). Then use the institutional panel, add a clinical preset, type gene names or upload a BED file. A BED preview is shown on the right. |
+| **2. Samples** | Optional sex stratification. Sample names are filled in from the FASTQ folder; set Male/Female for each sample or import a TSV. |
+| **3. Run** | Click the **FASTQ Folder** box and select the folder that contains the FASTQ files; the number of files and samples is shown. Enter an output folder name, adjust the thread count and the "Keep BAM files" option if needed, then start. The output folder is created next to the FASTQ folder. |
+| **4. Results** | Load `*_consensus_cnvs.tsv` and `CNV_Final_Summary_Report.tsv`. CNVs are matched to their classification by sample, chromosome, start position and type. |
 
-**FASTQ adlandırma:** `<ÖRNEK>_S<n>_L001_R1_001.fastq.gz` / `..._R2_001.fastq.gz` (Illumina standardı). Örnek adındaki `_S<n>` eki otomatik ayıklanır.
+**FASTQ naming:** `<SAMPLE>_S<n>_L001_R1_001.fastq.gz` / `..._R2_001.fastq.gz` (Illumina convention). The `_S<n>` suffix is stripped from sample names automatically.
 
-**Cinsiyet dosyası formatı** (sekmeyle ayrılmış, başlık satırı zorunlu):
+**Sex file format** (tab-separated, header row required):
 
 ```
 Pool	Gender
@@ -157,30 +162,30 @@ R462-POOL-37	Male
 R462-POOL-38	Female
 ```
 
-## Çıktılar
+## Outputs
 
 ```
-<çıktı klasörü>/
-├── Male/  Female/  All/                  # cinsiyet stratifikasyonu açıksa
-│   ├── qc/                               # flagstat, samtools stats, hedef derinliği
-│   ├── cnvkit/                           # .cnr, .cns, .call.cns, grafikler
-│   ├── exomedepth/                       # örnek bazlı ExomeDepth sonuçları
-│   ├── <önek>_consensus_cnvs.tsv         # iki araçla doğrulanmış (yüksek güven)
-│   ├── <önek>_union_cnvs.tsv             # iki aracın tüm çağrıları
-│   └── CNV_Final_Summary_Report.tsv      # ClassifyCNV sınıflandırması
-├── <klasör>_CNV_Final_Report.xlsx        # tüm grupların birleşik Excel raporu
-└── <klasör>_CNV_Final_Report.tsv
+<output folder>/
+├── Male/  Female/  All/                  # when sex stratification is on
+│   ├── qc/                               # flagstat, samtools stats, on-target depth
+│   ├── cnvkit/                           # .cnr, .cns, .call.cns, plots
+│   ├── exomedepth/                       # per-sample ExomeDepth results
+│   ├── <prefix>_consensus_cnvs.tsv       # confirmed by both callers (high confidence)
+│   ├── <prefix>_union_cnvs.tsv           # all calls from both callers
+│   └── CNV_Final_Summary_Report.tsv      # ClassifyCNV classification
+├── <folder>_CNV_Final_Report.xlsx        # combined Excel report for all groups
+└── <folder>_CNV_Final_Report.tsv
 ```
 
-- **Filtreleme önerileri:**
-  - ExomeDepth için `BF > 10`
-  - CNVkit için `|log2| > 0.3`
-  - En güvenilir sonuçlar konsensüs dosyasındakilerdir.
-- BAM dosyaları, "BAM dosyalarını sakla" seçilmedikçe analiz sonunda silinir.
+- **Filtering tips:**
+  - ExomeDepth: `BF > 10`
+  - CNVkit: `|log2| > 0.3`
+  - The consensus file contains the most reliable calls.
+- BAM files are deleted at the end of the run unless "Keep BAM files" is selected.
 
-## Yapılandırma
+## Configuration
 
-Tüm yollar proje köküne göredir; mutlak yol da yazılabilir. Değişiklikten sonra backend'i yeniden başlatın. Ayarlar `config.json` dosyasındadır:
+Settings are stored in `config.json`. Paths are relative to the project root; absolute paths also work. Restart the backend after changing it.
 
 ```json
 {
@@ -192,51 +197,51 @@ Tüm yollar proje köküne göredir; mutlak yol da yazılabilir. Değişiklikten
 }
 ```
 
-## Pipeline'ı komut satırından çalıştırma
+## Running the pipeline from the command line
 
-Arayüz olmadan da kullanılabilir:
+The pipeline can also be used without the interface:
 
 ```bash
 bash pipeline/cnv_pipeline_last.sh \
-    --input   /yol/FASTQ \
-    --output  /yol/CNV_output \
-    --prefix  kohort_A \
+    --input   /path/to/FASTQ \
+    --output  /path/to/CNV_output \
+    --prefix  cohort_A \
     --ref     reference/hg19.fasta \
     --bed     backend/targets_merged.bed \
     --genders genders.txt \
     --threads 8
 
-bash backend/cnv_anotation.sh /yol/CNV_output/Male tools/ClassifyCNV/ClassifyCNV.py
+bash backend/cnv_anotation.sh /path/to/CNV_output/Male tools/ClassifyCNV/ClassifyCNV.py
 ```
 
-Tüm seçenekler için: `bash pipeline/cnv_pipeline_last.sh --help`
+For all options: `bash pipeline/cnv_pipeline_last.sh --help`
 
-## Proje yapısı
+## Project structure
 
 ```
 CNVDetect/
 ├── backend/
-│   ├── main.py                 # FastAPI: BED üretimi, dosya yükleme, eşleştirme, pipeline WebSocket
-│   ├── cnv_anotation.sh        # ClassifyCNV ile sınıflandırma
-│   ├── download_genes.py       # UCSC refGene'den gen koordinat veritabanı
-│   ├── genes_db.json           # hg19 / hg38 gen koordinatları
-│   └── targets_merged.bed      # Kurumsal panel
+│   ├── main.py                 # FastAPI: BED generation, uploads, merging, pipeline WebSocket
+│   ├── cnv_anotation.sh        # Classification with ClassifyCNV
+│   ├── download_genes.py       # Builds the gene coordinate DB from UCSC refGene
+│   ├── genes_db.json           # hg19 / hg38 gene coordinates
+│   └── targets_merged.bed      # Institutional panel
 ├── pipeline/
-│   └── cnv_pipeline_last.sh    # BWA → Picard → CNVkit + ExomeDepth → Konsensüs
-├── src/                        # React arayüzü (sayfalar, bileşenler, TR/EN çeviriler)
-├── electron/                   # Masaüstü kabuğu
-├── config.json                 # Referans / script / araç yolları
-├── Dockerfile, nginx.conf, docker-compose.yml   # Web arayüzü
-└── reference/, tools/          # (depoda yok) referans genom ve ClassifyCNV
+│   └── cnv_pipeline_last.sh    # BWA → Picard → CNVkit + ExomeDepth → Consensus
+├── src/                        # React frontend (pages, components, EN/TR translations)
+├── electron/                   # Desktop shell
+├── config.json                 # Reference / script / tool paths
+├── Dockerfile, nginx.conf, docker-compose.yml   # Web frontend
+└── reference/, tools/          # (not in the repo) reference genome and ClassifyCNV
 ```
 
-## Sorun giderme
+## Troubleshooting
 
-| Belirti | Çözüm |
+| Symptom | Fix |
 |---|---|
-| Arayüzde "Backend servisi çalışmıyor" | Backend'in çalıştığını kontrol edin: `curl http://localhost:8765/health`. Docker kullanıyorsanız `--host 0.0.0.0` ile başlatın. |
-| API istekleri `502` dönüyor (Docker) | Backend kapalı ya da sadece `127.0.0.1`'de dinliyor. |
-| `Bind for 0.0.0.0:3001 failed: port is already allocated` | Eski bir container portu tutuyor: `sudo docker ps -a`. Eskisini kaldırın veya `docker-compose.yml`'de portu değiştirin. |
-| Annotation sonuç üretmiyor | Backend açılış logunda `classifyCNV` satırının `✓` olduğunu kontrol edin. |
-| `$'\r': command not found` | Script'lerin satır sonu CRLF olmuş. Depodaki `.gitattributes` bunu önler; elle düzeltmek için `sed -i 's/\r$//' dosya.sh`. |
-| WSL / Docker diski hızla büyüyor | `sudo docker system df` ile kontrol edin. Derleme önbelleği `sudo docker builder prune` ile temizlenebilir. WSL'in `ext4.vhdx` dosyası içeride yer açılsa bile kendiliğinden küçülmez; `diskpart` → `compact vdisk` ile küçültülür. |
+| "Backend service is down" in the interface | Check that the backend is running: `curl http://localhost:8765/health`. With Docker, start it with `--host 0.0.0.0`. |
+| API requests return `502` (Docker) | The backend is not running, or it only listens on `127.0.0.1`. |
+| `Bind for 0.0.0.0:3001 failed: port is already allocated` | An old container is holding the port. Check with `sudo docker ps -a`, then remove the old container or change the port in `docker-compose.yml`. |
+| Annotation produces no results | Check that the `classifyCNV` line in the backend startup log shows `✓`. |
+| `$'\r': command not found` | A script has CRLF line endings. The repository's `.gitattributes` prevents this; to fix a file by hand, run `sed -i 's/\r$//' file.sh`. |
+| The WSL / Docker disk keeps growing | Check with `sudo docker system df`; the build cache can be cleared with `sudo docker builder prune`. WSL's `ext4.vhdx` does not shrink by itself when space is freed inside it; compact it with `diskpart` → `compact vdisk`. |
