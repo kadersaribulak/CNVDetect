@@ -1,0 +1,199 @@
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; align-items:start; }
+@media(max-width:1000px){ .grid { grid-template-columns:1fr; } }
+.left  { display:flex; flex-direction:column; gap:1rem; }
+.right { position:sticky; top:1rem; }
+
+.genomeBtns { display:flex; gap:10px; }
+.gBtn {
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+  padding:12px 20px; border-radius:var(--r-lg); border:1.5px solid var(--border2);
+  background:var(--surface2); cursor:pointer; transition:all .15s;
+}
+.gBtn:hover { border-color:var(--blue); background:var(--blue-light); }
+.gActive { border-color:var(--blue)!important; background:var(--blue-light)!important; box-shadow:0 0 0 3px var(--blue-glow); }
+.gName { font-size:16px; font-weight:700; color:var(--text); }
+.gActive .gName { color:var(--blue); }
+.gSub  { font-size:10px; color:var(--muted); }
+.gActive .gSub { color:var(--blue); opacity:.75; }
+
+.presetGrid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+@media(max-width:600px){ .presetGrid { grid-template-columns:1fr; } }
+.presetBtn {
+  display:flex; align-items:center; justify-content:space-between; gap:5px;
+  padding:9px 12px; border-radius:var(--r); border:1px solid var(--border2);
+  background:var(--surface2); font-size:12px; font-weight:500; color:var(--text2);
+  cursor:pointer; transition:all .14s; text-align:left;
+}
+.presetBtn:hover { border-color:var(--blue); color:var(--blue); background:var(--blue-light); }
+.presetActive { border-color:var(--blue)!important; background:var(--blue-light)!important; color:var(--blue)!important; }
+.presetApply {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 12px; border-radius:var(--r); background:var(--blue-light);
+  border:1px solid var(--blue-mid); margin-top:8px;
+}
+.presetSel { font-size:12px; font-weight:600; color:var(--blue); }
+
+.inputRow  { display:flex; gap:8px; margin-bottom:6px; }
+.acWrap    { position:relative; flex:1; }
+.ico { position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--muted2); pointer-events:none; }
+.geneIn {
+  width:100%; padding:9px 12px 9px 33px;
+  border:1px solid var(--border2); border-radius:var(--r);
+  background:var(--surface); color:var(--text); font-size:13px;
+  font-family:var(--font); outline:none; transition:border-color .14s;
+}
+.geneIn:focus { border-color:var(--blue); box-shadow:0 0 0 3px var(--blue-glow); }
+.geneIn::placeholder { color:var(--muted2); }
+.dropdown {
+  position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:200;
+  background:var(--surface); border:1px solid var(--border2);
+  border-radius:var(--r); box-shadow:var(--shadow-lg); overflow:hidden;
+}
+.dropItem {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:9px 14px; cursor:pointer; background:none; border:none;
+  width:100%; font-size:13px; transition:background .1s; text-align:left;
+}
+.dropItem:hover { background:var(--blue-light); }
+.dropGene  { font-weight:500; color:var(--text); }
+.dropBuild { font-size:10px; color:var(--muted2); font-family:var(--mono); }
+
+.geneList     { border-top:1px solid var(--border); padding-top:12px; margin-top:8px; }
+.geneListHead { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.geneCount    { font-size:12px; color:var(--muted2); font-weight:500; }
+.clearAll { background:none; border:none; color:var(--del); font-size:12px; cursor:pointer; }
+.clearAll:hover { text-decoration:underline; }
+.tags { display:flex; flex-wrap:wrap; gap:5px; }
+
+.slider { width:100%; accent-color:var(--blue); margin-top:4px; }
+.sliderLabels { display:flex; justify-content:space-between; font-size:10px; color:var(--muted2); margin-top:4px; }
+
+.genBtn { width:100%; justify-content:center; }
+
+/* BED OUTPUT CARD */
+.bedCard {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-lg); box-shadow:var(--shadow-sm);
+  display:flex; flex-direction:column; min-height:420px; max-height:640px;
+  overflow:hidden;
+}
+.bedHead {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:1rem 1.25rem; border-bottom:1px solid var(--border);
+  background:var(--surface2); flex-shrink:0;
+}
+.bedTitle { font-size:14px; font-weight:700; color:var(--text); }
+.bedMeta  { font-size:11px; color:var(--muted); margin-top:2px; font-family:var(--mono); }
+.missing  { display:flex; align-items:center; gap:7px; padding:8px 14px; background:var(--warn-light); border-bottom:1px solid var(--warn-mid); font-size:12px; color:var(--warn); flex-shrink:0; }
+.savedMsg { padding:8px 14px; background:var(--ok-light); border-bottom:1px solid var(--ok-mid); font-size:11px; color:var(--ok); flex-shrink:0; font-family:var(--mono); }
+.bedPre { flex:1; overflow:auto; padding:1rem 1.25rem; font-family:var(--mono); font-size:12px; line-height:1.8; color:var(--text2); background:var(--surface2); white-space:pre; margin:0; }
+.bedEmpty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.75rem; padding:2rem; text-align:center; }
+.bedEmptyIcon { font-size:36px; }
+.bedEmpty p { font-size:13px; color:var(--muted2); }
+.bedEmptyHint { font-size:11px; color:var(--muted2); }
+
+/* MODE TABS */
+.modeTabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 4px;
+}
+.modeTab {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 10px; border-radius: var(--r);
+  border: none; background: none;
+  font-size: 12px; font-weight: 500; color: var(--muted2);
+  cursor: pointer; transition: all .15s; white-space: nowrap;
+}
+.modeTab:hover { color: var(--text); background: var(--surface); }
+.modeActive { background: var(--surface) !important; color: var(--blue) !important; box-shadow: var(--shadow-sm); }
+.modeIcon { display: flex; align-items: center; font-size: 14px; }
+
+/* INSTITUTIONAL */
+.instCard {
+  display: flex; align-items: center; gap: 14px;
+  padding: 4px 0;
+}
+.instIcon { font-size: 28px; flex-shrink: 0; }
+.instInfo { flex: 1; }
+.instTitle { font-size: 14px; font-weight: 600; color: var(--text); }
+.instDesc  { font-size: 12px; color: var(--muted2); margin-top: 2px; }
+.instLoaded {
+  margin-top: 12px; padding: 9px 12px; border-radius: var(--r);
+  background: var(--ok-light); border: 1px solid var(--ok-mid);
+  font-size: 12px; color: var(--ok); font-weight: 500;
+}
+
+/* DROP ZONE */
+.dropZone {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 2.5rem 1.5rem;
+  border: 2px dashed var(--border2); border-radius: var(--r-lg);
+  background: var(--surface2); cursor: pointer;
+  transition: all .18s; text-align: center;
+  min-height: 180px;
+}
+.dropZone:hover { border-color: var(--blue); background: var(--blue-light); }
+.dropActive { border-color: var(--blue) !important; background: var(--blue-light) !important; }
+.dropLoaded { border-style: solid; border-color: var(--ok); background: var(--ok-light); cursor: default; }
+.dropIcon  { color: var(--muted2); transition: color .18s; }
+.dropZone:hover .dropIcon { color: var(--blue); }
+.dropLabel { font-size: 14px; font-weight: 600; color: var(--text2); }
+.dropHint  { font-size: 12px; color: var(--muted2); }
+.dropLoadedIcon { font-size: 32px; color: var(--ok); }
+.dropLoadedName { font-size: 13px; font-weight: 600; color: var(--ok); }
+.dropLoadedCount{ font-size: 12px; color: var(--ok); opacity: .8; }
+.dropClear {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 99px;
+  border: 1px solid var(--ok-mid); background: var(--surface);
+  font-size: 11px; color: var(--muted2); cursor: pointer;
+  margin-top: 4px; transition: all .14s;
+}
+.dropClear:hover { border-color: var(--del); color: var(--del); background: var(--del-light); }
+.uploadReady {
+  margin-top: 10px; padding: 9px 12px; border-radius: var(--r);
+  background: var(--ok-light); border: 1px solid var(--ok-mid);
+  font-size: 12px; color: var(--ok);
+}
+
+/* BED ACTIONS */
+.bedActions { display: flex; gap: 6px; }
+
+/* PRESET APPLY ROW */
+.presetApplyInfo { display:flex; flex-direction:column; gap:2px; }
+.presetCount     { font-size:11px; color:var(--muted2); }
+.presetApplyBtns { display:flex; gap:7px; flex-shrink:0; }
+
+/* CURRENT GENES BAR */
+.currentGenes {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-top:12px; padding:8px 12px; border-radius:var(--r);
+  background:var(--blue-light); border:1px solid var(--blue-mid);
+  font-size:12px;
+}
+.currentGenesLabel { color:var(--blue); font-weight:500; }
+
+/* EXISTING NOTE */
+.existingNote {
+  padding:7px 10px; border-radius:var(--r-sm);
+  background:var(--teal-light); border:1px solid var(--teal-mid);
+  font-size:11px; color:var(--teal); margin-bottom:10px;
+}
+
+/* INLINE PADDING ROW */
+.paddingRow {
+  display:flex; align-items:center; gap:12px;
+  padding:10px 0; margin-top:4px;
+}
+.paddingLabel { font-size:12px; color:var(--muted2); white-space:nowrap; min-width:130px; }
+.sliderInline { flex:1; accent-color:var(--blue); }
+
+/* Gene pool banner - shows across all modes */
+.genePoolBanner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-radius: var(--r);
+  background: var(--blue-light); border: 1px solid var(--blue-mid);
+  margin-bottom: 10px;
+}
+.genePoolCount { font-size: 12px; font-weight: 600; color: var(--blue); }

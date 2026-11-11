@@ -1,0 +1,81 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:          #f0f3f8;
+  --surface:     #ffffff;
+  --surface2:    #f7f9fc;
+  --surface3:    #edf0f7;
+  --border:      #dde2ec;
+  --border2:     #c8d0e0;
+  --text:        #141e30;
+  --text2:       #3a4a62;
+  --muted:       #7a8ba8;
+  --muted2:      #a4b0c4;
+
+  --blue:        #2563eb;
+  --blue2:       #1d4ed8;
+  --blue3:       #1e40af;
+  --blue-light:  #eff4ff;
+  --blue-mid:    #dbeafe;
+  --blue-glow:   rgba(37,99,235,.1);
+
+  --teal:        #0891b2;
+  --teal-light:  #ecfeff;
+  --teal-mid:    #a5f3fc;
+
+  --del:         #dc2626;
+  --del-light:   #fef2f2;
+  --del-mid:     #fecaca;
+
+  --dup:         #0369a1;
+  --dup-light:   #eff6ff;
+  --dup-mid:     #bfdbfe;
+
+  --ok:          #16a34a;
+  --ok-light:    #f0fdf4;
+  --ok-mid:      #bbf7d0;
+
+  --warn:        #d97706;
+  --warn-light:  #fffbeb;
+  --warn-mid:    #fde68a;
+
+  --path:        #7c3aed;
+  --path-light:  #f5f3ff;
+  --path-mid:    #ddd6fe;
+
+  --shadow-xs: 0 1px 2px rgba(20,30,48,.05);
+  --shadow-sm: 0 2px 6px rgba(20,30,48,.07), 0 1px 2px rgba(20,30,48,.04);
+  --shadow:    0 4px 16px rgba(20,30,48,.09), 0 1px 4px rgba(20,30,48,.05);
+  --shadow-lg: 0 12px 40px rgba(20,30,48,.13), 0 4px 12px rgba(20,30,48,.07);
+  --shadow-xl: 0 24px 64px rgba(20,30,48,.16), 0 8px 20px rgba(20,30,48,.09);
+
+  --r-xs: 4px;
+  --r-sm: 7px;
+  --r:    11px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-2xl:30px;
+
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+html { font-size: 14px; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+#root { min-height: 100vh; display: flex; flex-direction: column; }
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted2); }
+
+/* Electron drag */
+.drag { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }

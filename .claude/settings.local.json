@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(C:/Users/kader.saribulak/AppData/Local/Microsoft/WindowsApps/python.exe --version)",
+      "Bash(where node:*)",
+      "Bash(where npm:*)",
+      "Bash(cmd /c \"where node\")",
+      "Bash(cmd /c \"where npm\")",
+      "Bash(cmd /c \"node --version\")",
+      "Bash(powershell -Command \"Get-Command node -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(ls \"C:\\\\Users\\\\kader.saribulak\\\\Desktop\\\\CNVDetect\\\\node_modules\\\\.bin\\\\vite\"*)",
+      "Bash(ls /c/Users/kader.saribulak/Desktop/CNVDetect/node_modules/.bin/vite*)",
+      "Bash(ls /c/Users/kader.saribulak/Desktop/CNVDetect/node_modules/.bin/*.cmd)",
+      "Bash(\"/c/Program Files/RStudio/resources/app/bin/node/node.exe\" --version)",
+      "Bash(\"/c/Program Files/RStudio/resources/app/bin/node/node.exe\" node_modules/.bin/vite --port 5173)",
+      "Bash(\"/c/Program Files/RStudio/resources/app/bin/node/node.exe\" node_modules/vite/bin/vite.js --port 5173)"
+    ]
+  }
+}

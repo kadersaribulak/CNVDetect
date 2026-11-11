@@ -1,0 +1,7 @@
+{
+  "ref":      "./reference/hg19.fasta",
+  "pipeline": "./pipeline/cnv_pipeline_last.sh",
+  "anno":     "./backend/cnv_anotation.sh",
+  "instBed":  "./backend/targets_merged.bed",
+  "classifyCNV": "./tools/ClassifyCNV/ClassifyCNV.py"
+}
