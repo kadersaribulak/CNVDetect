@@ -1,6 +1,10 @@
-node_modules
-dist
-dist-electron
-.git
-*.log
-npm-debug.log*
+# Allow-list: the frontend image only needs these files.
+# Everything else (reference/ genome ~8 GB, tools/, .git, node_modules, outputs…) is
+# excluded — otherwise every build copied ~8.7 GB into Docker's build cache.
+*
+!package.json
+!package-lock.json
+!index.html
+!vite.config.js
+!src/
+!nginx.conf

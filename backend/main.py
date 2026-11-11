@@ -388,6 +388,80 @@ async def find_folder(name: str, file: str = ""):
     candidates.sort(key=lambda p: p.count('/'), reverse=True)
     return {"path": candidates[0], "name": name, "ambiguous": True}
 
+# ── Server-side folder browser (read-only) ──────────────────────────────────
+# The browser's own folder dialog hides files and cannot return a full path, so the UI
+# navigates folders through the backend instead. Only names are listed — never contents.
+_FASTQ_EXTS = (".fastq.gz", ".fq.gz", ".fastq", ".fq")
+_WIN_SYSTEM_USERS = {"Public", "Default", "Default User", "All Users", "defaultuser0", "WDAGUtilityAccount"}
+
+def _windows_user_dirs():
+    """Real Windows user profile folders under /mnt/c/Users (WSL)."""
+    base = "/mnt/c/Users"
+    if not os.path.isdir(base):
+        return []
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return []
+    return [os.path.join(base, n) for n in sorted(names)
+            if n not in _WIN_SYSTEM_USERS and not n.startswith(".")
+            and os.path.isdir(os.path.join(base, n, "Desktop"))]
+
+def _browse_shortcuts():
+    items = []
+    for u in _windows_user_dirs():
+        for sub, tr in [("Desktop", "Masaüstü"), ("Documents", "Belgeler"), ("Downloads", "İndirilenler")]:
+            p = os.path.join(u, sub)
+            if os.path.isdir(p):
+                items.append({"label": tr, "path": p})
+    home = str(pathlib.Path.home())
+    items.append({"label": "Linux Home", "path": home})
+    if os.path.isdir("/mnt/c"):
+        items.append({"label": "C:", "path": "/mnt/c"})
+    return items
+
+@app.get("/api/browse")
+async def browse(path: str = ""):
+    if not path:
+        users = _windows_user_dirs()
+        path = os.path.join(users[0], "Desktop") if len(users) == 1 else str(pathlib.Path.home())
+    path = os.path.normpath(path)
+    if not os.path.isabs(path) or not os.path.isdir(path):
+        return {"error": f"Klasör bulunamadı: {path}", "path": path, "shortcuts": _browse_shortcuts()}
+
+    def listing():
+        dirs, fastqs, others = [], [], 0
+        with os.scandir(path) as it:
+            for e in it:
+                if e.name.startswith((".", "$")):
+                    continue
+                try:
+                    if e.is_dir():
+                        dirs.append(e.name)
+                    elif e.name.lower().endswith(_FASTQ_EXTS):
+                        fastqs.append(e.name)
+                    else:
+                        others += 1
+                except OSError:
+                    pass
+        return dirs, fastqs, others
+
+    try:
+        dirs, fastqs, others = await asyncio.to_thread(listing)
+    except PermissionError:
+        return {"error": f"Erişim izni yok: {path}", "path": path, "shortcuts": _browse_shortcuts()}
+
+    parent = os.path.dirname(path)
+    return {
+        "path": path,
+        "parent": parent if parent != path else None,
+        "dirs": sorted(dirs, key=str.lower),
+        "fastqs": sorted(fastqs, key=str.lower),
+        "samples": sorted(_scan_fastq_samples(path).keys()),  # names the pipeline will detect
+        "otherFiles": others,
+        "shortcuts": _browse_shortcuts(),
+    }
+
 # ── Detect sample names from FASTQ folder ───────────────────────────────────
 @app.get("/api/detect-samples")
 async def detect_samples(folder: str):

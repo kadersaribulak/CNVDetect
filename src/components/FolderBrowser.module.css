@@ -1,0 +1,52 @@
+.overlay { position:fixed; inset:0; background:rgba(20,30,48,.38); display:flex; align-items:center; justify-content:center; z-index:1000; padding:16px; }
+.dialog { width:min(760px, 100%); max-height:min(620px, 100%); display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow-xl); overflow:hidden; }
+
+.head { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); }
+.title { font-weight:700; font-size:15px; }
+.iconBtn { display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface); color:var(--text2); cursor:pointer; flex-shrink:0; }
+.iconBtn:hover:not(:disabled) { border-color:var(--blue); color:var(--blue); }
+.iconBtn:disabled { opacity:.4; cursor:default; }
+
+.pathBar { display:flex; align-items:center; gap:8px; padding:10px 18px 6px; }
+.crumbs { display:flex; align-items:center; flex-wrap:wrap; gap:2px; min-width:0; font-size:12px; }
+.crumbWrap { display:inline-flex; align-items:center; gap:2px; }
+.crumb { border:none; background:none; color:var(--text2); cursor:pointer; padding:2px 4px; border-radius:var(--r-xs); font-size:12px; font-family:var(--font); }
+.crumb:hover { background:var(--blue-light); color:var(--blue); }
+.sep { color:var(--muted2); }
+
+.typeRow { display:flex; gap:6px; padding:0 18px 10px; border-bottom:1px solid var(--border); }
+.typeInput { flex:1; min-width:0; padding:7px 10px; border:1px solid var(--border2); border-radius:var(--r-sm); font-family:var(--mono); font-size:12px; color:var(--text); background:var(--surface2); outline:none; }
+.typeInput:focus { border-color:var(--blue); background:var(--surface); }
+.goBtn { padding:0 14px; border:1px solid var(--border2); border-radius:var(--r-sm); background:var(--surface); color:var(--text2); cursor:pointer; font-weight:600; font-size:12px; }
+.goBtn:hover { border-color:var(--blue); color:var(--blue); }
+
+.body { display:flex; flex:1; min-height:260px; overflow:hidden; }
+.side { width:150px; flex-shrink:0; border-right:1px solid var(--border); padding:8px; display:flex; flex-direction:column; gap:2px; overflow-y:auto; background:var(--surface2); }
+.shortcut { display:flex; align-items:center; gap:7px; padding:6px 8px; border:none; background:none; border-radius:var(--r-sm); color:var(--text2); font-size:12px; cursor:pointer; text-align:left; font-family:var(--font); }
+.shortcut span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.shortcut:hover { background:var(--surface3); }
+.shortcutOn { background:var(--blue-light); color:var(--blue); font-weight:600; }
+
+.list { flex:1; overflow-y:auto; padding:6px; }
+.row { display:flex; align-items:center; gap:9px; width:100%; padding:6px 10px; border:none; background:none; border-radius:var(--r-sm); font-size:13px; color:var(--text); text-align:left; cursor:pointer; font-family:var(--font); }
+.row span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.row:hover { background:var(--blue-light); }
+.fileRow { cursor:default; color:var(--text2); font-family:var(--mono); font-size:12px; }
+.fileRow:hover { background:none; }
+.folderIco { color:#e0a526; flex-shrink:0; }
+.fileIco { color:var(--ok); flex-shrink:0; }
+.empty { padding:24px; text-align:center; color:var(--muted); font-size:13px; }
+.error { margin:12px; padding:10px 12px; border-radius:var(--r-sm); background:var(--del-light); border:1px solid var(--del-mid); color:var(--del); font-size:13px; }
+
+.foot { display:flex; align-items:center; gap:8px; padding:12px 18px; border-top:1px solid var(--border); background:var(--surface2); }
+.summary { flex:1; min-width:0; font-size:12px; color:var(--text2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sampleNames { color:var(--muted); font-family:var(--mono); }
+.muted { color:var(--muted); }
+.cancelBtn { padding:7px 14px; border:1px solid var(--border2); border-radius:var(--r-sm); background:var(--surface); color:var(--text2); cursor:pointer; font-size:13px; }
+.pickBtn { display:flex; align-items:center; gap:6px; padding:7px 16px; border:none; border-radius:var(--r-sm); background:var(--blue); color:#fff; font-weight:600; cursor:pointer; font-size:13px; }
+.pickBtn:hover:not(:disabled) { background:var(--blue2); }
+.pickBtn:disabled { background:var(--muted2); cursor:not-allowed; }
+
+@media (max-width: 560px) {
+  .side { display:none; }
+}

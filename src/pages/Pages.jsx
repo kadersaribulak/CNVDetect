@@ -9,6 +9,7 @@ import { useLang } from '../hooks/useLang'
 import { pickFolder, saveFilePath, writeToDisk } from '../hooks/useElectron'
 import { WizardLayout, Btn, Tag, SectionCard, Badge, ClassBadge, ConfBadge, UploadZone, StatCard } from '../components/UI'
 import { API, WS_PIPELINE } from '../api'
+import FolderBrowser from '../components/FolderBrowser'
 import sp from './SamplesPage.module.css'
 import rp from './RunPage.module.css'
 import re from './ResultsPage.module.css'
@@ -193,6 +194,7 @@ export function RunPage() {
   const [fastqDrag, setFastqDrag] = useState(false)
   const [outDrag,   setOutDrag]   = useState(false)
   const [doneOutput,setDoneOutput]= useState('')
+  const [browserOpen,setBrowserOpen] = useState(false)
   const wsRef   = useRef(null)
   const logsRef = useRef(null)
 
@@ -413,41 +415,25 @@ export function RunPage() {
       {!running && status === null && (
         <div className={rp.setupLayout}>
           <div className={rp.folderRow}>
-            {/* FASTQ zone — native folder picker, shows only folder name */}
-            <label className={`${rp.folderZone} ${fastqDir?rp.folderLoaded:''}`}>
-              <input type="file" webkitdirectory="true" style={{display:'none'}}
-                onChange={async e => {
-                  const files = e.target.files
-                  if (!files?.length) return
-                  const rel = files[0].webkitRelativePath  // "folderName/file.fastq"
-                  if (!rel) return
-                  const topFolder = rel.split('/')[0]
-                  // Pass a filename inside the folder to help backend disambiguate
-                  const fileHint = files[0].name
-                  try {
-                    const url = API + '/api/find-folder?name=' + encodeURIComponent(topFolder) + '&file=' + encodeURIComponent(fileHint)
-                    const r = await fetch(url)
-                    const d = await r.json()
-                    if (d.path) {
-                      setFastqDir(d.path)
-                      setOutputDir('CNV_output')
-                      return
-                    }
-                  } catch(err) {}
-                  setFastqDir(topFolder)
-                  setOutputDir('CNV_output')
-                }}
-              />
+            {/* FASTQ zone — opens the backend-driven folder browser (shows FASTQ files, returns full path) */}
+            <div className={`${rp.folderZone} ${fastqDir?rp.folderLoaded:''}`} role="button" tabIndex={0}
+              onClick={()=>setBrowserOpen(true)}
+              onKeyDown={e=>{ if (e.key==='Enter'||e.key===' ') { e.preventDefault(); setBrowserOpen(true) } }}>
               <div className={rp.folderZoneIcon}>{fastqDir ? '📂' : '📥'}</div>
               <div className={rp.folderZoneTitle}>{lang==='tr'?'FASTQ Klasörü':'FASTQ Folder'}</div>
               {fastqDir
                 ? <div className={rp.folderZonePath}>
                     <span>{fastqDir.split('/').pop() || fastqDir}</span>
-                    <button className={rp.folderZoneClear} onClick={e=>{e.preventDefault();setFastqDir('');setOutputDir('')}}>✕</button>
+                    <button className={rp.folderZoneClear} onClick={e=>{e.stopPropagation();setFastqDir('');setOutputDir('')}}>✕</button>
                   </div>
                 : <div className={rp.folderZoneHint}>{lang==='tr'?'Tıkla → klasör seç':'Click → pick folder'}</div>
               }
-            </label>
+            </div>
+            {browserOpen && (
+              <FolderBrowser lang={lang} initialPath={fastqDir}
+                onClose={()=>setBrowserOpen(false)}
+                onSelect={p=>{ setFastqDir(p); if (!outputDir) setOutputDir('CNV_output'); setBrowserOpen(false) }}/>
+            )}
 
             <div className={rp.folderArrow}>
               <ArrowRight size={24} color="var(--muted2)"/>
