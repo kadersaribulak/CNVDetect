@@ -1,7 +1,9 @@
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package.json .
-RUN npm install
+COPY package.json package-lock.json ./
+# Skip the Electron binary download — only the web build is needed here
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
+RUN npm ci
 COPY . .
 RUN npm run build:web
 

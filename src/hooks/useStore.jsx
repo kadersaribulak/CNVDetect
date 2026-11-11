@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback } from 'react'
 import axios from 'axios'
+import { API } from '../api'
 
-const API = 'http://localhost:8765'
 const Ctx = createContext(null)
 
 export function StoreProvider({ children }) {

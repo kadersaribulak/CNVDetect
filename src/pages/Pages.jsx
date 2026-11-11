@@ -8,6 +8,7 @@ import { useStore } from '../hooks/useStore'
 import { useLang } from '../hooks/useLang'
 import { pickFolder, saveFilePath, writeToDisk } from '../hooks/useElectron'
 import { WizardLayout, Btn, Tag, SectionCard, Badge, ClassBadge, ConfBadge, UploadZone, StatCard } from '../components/UI'
+import { API, WS_PIPELINE } from '../api'
 import sp from './SamplesPage.module.css'
 import rp from './RunPage.module.css'
 import re from './ResultsPage.module.css'
@@ -71,8 +72,7 @@ export function SamplesPage() {
   useEffect(() => {
     if (!fastqDir || !fastqDir.startsWith('/')) return
     if (sampleRows.filter(r => r.id.trim()).length > 0) return // already has data
-    const API_HTTP = window.location.origin === 'null' ? 'http://localhost:8765' : window.location.origin
-    fetch(API_HTTP + '/api/detect-samples?folder=' + encodeURIComponent(fastqDir))
+    fetch(API + '/api/detect-samples?folder=' + encodeURIComponent(fastqDir))
       .then(r => r.json())
       .then(d => {
         if (d.samples && d.samples.length > 0 && sampleRows.filter(r=>r.id.trim()).length === 0) {
@@ -176,9 +176,6 @@ export function SamplesPage() {
   )
 }
 
-const API_HTTP = window.location.origin === 'null' ? 'http://localhost:8765' : window.location.origin
-const API_WS = API_HTTP.replace(/^http/, 'ws') + '/ws/pipeline'
-
 export function RunPage() {
   const { genome, genes, bedText, bedPath, sampleRows, useGender, genderPath,
           fastqDir, setFastqDir, outputDir, setOutputDir, doAnno, setDoAnno, threads, setThreads, keepBams, setKeepBams,
@@ -203,11 +200,10 @@ export function RunPage() {
 
   // Check if a pipeline is running in background on mount
   useEffect(() => {
-    const API_HTTP = window.location.origin === 'null' ? 'http://localhost:8765' : window.location.origin
-    fetch(API_HTTP + '/api/pipeline-status')
+    fetch(API + '/api/pipeline-status')
       .then(r => r.json())
       .then(d => {
-        if (d.running || (d.step && d.step !== 'completed' && d.step !== '')) {
+        if (d.running) {
           setBgPipeline(d)
         }
       })
@@ -218,7 +214,7 @@ export function RunPage() {
   useEffect(() => {
     const check = async () => {
       try {
-        const r = await fetch((window.location.origin === 'null' ? 'http://localhost:8765' : window.location.origin) + '/health')
+        const r = await fetch(API + '/health')
         setBackendOk(r.ok)
       } catch { setBackendOk(false) }
     }
@@ -289,16 +285,15 @@ export function RunPage() {
   // Paths loaded from config.json via backend /api/config
   const [appConfig, setAppConfig] = useState({})
   useEffect(() => {
-    const API_HTTP = window.location.origin === 'null' ? 'http://localhost:8765' : window.location.origin
-    fetch(API_HTTP + '/api/config')
+    fetch(API + '/api/config')
       .then(r => r.json())
       .then(d => setAppConfig(d))
       .catch(() => {})
   }, [])
 
+  // Pipeline/annotation script paths are resolved by the backend from config.json
+  // and are never sent from the client.
   const REF      = appConfig.ref      || ''
-  const PIPELINE = appConfig.pipeline || ''
-  const ANNO     = appConfig.anno     || ''
   const INST_BED = appConfig.instBed  || ''
 
   // Resolve which BED to use in pipeline
@@ -312,53 +307,33 @@ export function RunPage() {
     ? INST_BED
     : ''  // backend will use bedText to create tmp file
 
+  // The backend needs a full (absolute) path; the browser folder picker only gives a name
+  const fastqAbsolute = !!fastqDir && fastqDir.startsWith('/')
   const missing  = [
     !fastqDir && (lang==='tr' ? 'FASTQ klasörü seçilmedi' : 'FASTQ folder not selected'),
+    fastqDir && !fastqAbsolute && (lang==='tr'
+      ? 'FASTQ klasörünün tam yolu bulunamadı — aşağıya tam yolu girin (ör. /mnt/c/Users/.../FASTQ)'
+      : 'Full FASTQ folder path not found — enter the full path below (e.g. /mnt/c/Users/.../FASTQ)'),
     !hasBedContent && !isInstitutional && (lang==='tr' ? 'BED dosyası seçilmedi' : 'BED file not selected'),
   ].filter(Boolean)
-  const ready = !!fastqDir && (hasBedContent || isInstitutional)
+  const ready = fastqAbsolute && (hasBedContent || isInstitutional)
 
-  const handleDrop = (setter, setDrag) => e => {
-    e.preventDefault(); setDrag(false)
-    const files = e.dataTransfer.files
-    if (files?.length) {
-      const f = files[0]
-      const p = f.webkitRelativePath || f.name
-      setter(p.includes('/') ? p.split('/').slice(0,-1).join('/') : '/'+p)
-    }
-  }
-
-  const handleBrowse = (setter) => e => {
-    const files = e.target.files
-    if (files?.length) {
-      const f = files[0]
-      // webkitRelativePath: "FolderName/file.fastq" -> take the folder part
-      const rel = f.webkitRelativePath
-      if (rel && rel.includes('/')) {
-        // Build WSL path from the relative path's top folder
-        // We can't know the full path from browser security, so show folder name
-        // and let user confirm/edit if needed
-        const folderName = rel.split('/')[0]
-        setter(folderName)
-      } else {
-        setter(f.name)
-      }
-    }
-  }
+  // Set when the user presses Stop — later socket events must not turn the state into "error"
+  const stoppedRef = useRef(false)
 
   const startPipeline = () => {
     if (!ready) return
+    stoppedRef.current = false
     setLogs([]); setSteps([]); setStatus('running'); setRunning(true); setShowLogs(true); resetTracks()
 
-    const wsUrl = (window.location.origin === 'null' ? 'http://localhost:8765' : window.location.origin).replace(/^http/, 'ws') + '/ws/pipeline'
-    const ws = new WebSocket(wsUrl)
+    const ws = new WebSocket(WS_PIPELINE)
     wsRef.current = ws
-    // Expand output path if user typed just a folder name
-    // fastqDir = full WSL path, outputDir = output folder name only
+    // fastqDir = full path, outputDir = output folder name only
     // Build full output path: same parent as fastqDir + outputDir name
-    const fastqParent = fastqDir.includes('/') ? fastqDir.substring(0, fastqDir.lastIndexOf('/')) : fastqDir
+    const trimmedFastq = fastqDir.replace(/\/+$/, '')
+    const fastqParent = trimmedFastq.substring(0, trimmedFastq.lastIndexOf('/')) || '/'
     const outputName  = outputDir.replace(/\/+/g, '').trim() || 'CNV_output'
-    const fullOutputDir = fastqParent + '/' + outputName
+    const fullOutputDir = fastqParent.replace(/\/$/, '') + '/' + outputName
     // Gender label for prefix: if all Male → _Male, all Female → _Female, mixed/none → ''
     // No gender label in prefix — pipeline handles Male/Female subfolders itself
     const prefixWithGender = outputName
@@ -371,13 +346,14 @@ export function RunPage() {
       gendersText: useGender && sampleRows.filter(r=>r.id.trim()).length > 0
         ? ['Pool\tGender', ...sampleRows.filter(r=>r.id.trim()).map(r=>`${r.id}\t${r.gender}`)].join('\n')
         : '',
-      pipelineScript: PIPELINE, doAnno, annoScript: ANNO, threads, keepBams,
+      doAnno, threads, keepBams,
     }))
     ws.onmessage = e => {
       try {
         const msg = JSON.parse(e.data)
         if (msg.type === 'ping') return  // keepalive, ignore
         setLogs(p => [...p, msg])
+        if (stoppedRef.current) return  // after Stop: show backend confirmation, keep "stopped" state
         updateSteps(msg.msg)
         if (msg.type==='success'||msg.type==='done') {
           setStatus('success')
@@ -387,8 +363,15 @@ export function RunPage() {
         if (msg.type==='error') setStatus('error')
       } catch {}
     }
-    ws.onclose = () => { setRunning(false); wsRef.current = null; setStatus(prev => prev === 'success' ? 'success' : prev === null ? 'error' : prev) }
+    ws.onclose = () => {
+      setRunning(false)
+      if (wsRef.current === ws) wsRef.current = null
+      if (stoppedRef.current) return
+      // Socket closed without a final success → treat as failure
+      setStatus(prev => prev === 'success' ? 'success' : 'error')
+    }
     ws.onerror = () => {
+      if (stoppedRef.current) return
       setLogs(p => [...p,
         {type:'error', msg:'❌ WebSocket bağlantı hatası!'},
         {type:'info',  msg:'Backend servisinin çalıştığından emin olun (http://localhost:8765)'},
@@ -398,8 +381,19 @@ export function RunPage() {
   }
 
   const stopPipeline = () => {
-    if (wsRef.current) { wsRef.current.close(); wsRef.current = null }
-    setRunning(false); setStatus('error')
+    stoppedRef.current = true
+    const ws = wsRef.current
+    if (ws) {
+      // Ask the backend to kill the pipeline; it replies with a confirmation and closes the socket.
+      // If it does not answer in 5 s, close from our side (a disconnect also kills the pipeline).
+      try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: 'stop' })) } catch {}
+      setTimeout(() => { if (ws.readyState !== WebSocket.CLOSED) ws.close() }, 5000)
+    }
+    // Freeze the step that was running — it is neither done nor still active
+    const freeze = list => list.map(s => s.active ? { ...s, active:false, stopped:true } : s)
+    setSteps(freeze); setMaleSteps(freeze); setFemaleSteps(freeze); setAllSteps(freeze)
+    setLogs(p => [...p, { type:'info', msg: lang==='tr' ? '■ Durdurma isteği gönderildi...' : '■ Stop requested...' }])
+    setRunning(false); setStatus('stopped')
   }
 
   const logClass = type => type==='error'?rp.logError:type==='success'?rp.logSuccess:type==='info'?rp.logInfo:type==='cmd'?rp.logCmd:rp.logLine
@@ -431,8 +425,7 @@ export function RunPage() {
                   // Pass a filename inside the folder to help backend disambiguate
                   const fileHint = files[0].name
                   try {
-                    const API_HTTP = window.location.origin === 'null' ? 'http://localhost:8765' : window.location.origin
-                    const url = API_HTTP + '/api/find-folder?name=' + encodeURIComponent(topFolder) + '&file=' + encodeURIComponent(fileHint)
+                    const url = API + '/api/find-folder?name=' + encodeURIComponent(topFolder) + '&file=' + encodeURIComponent(fileHint)
                     const r = await fetch(url)
                     const d = await r.json()
                     if (d.path) {
@@ -480,6 +473,16 @@ export function RunPage() {
               />
             </div>
           </div>
+
+          {/* Full FASTQ path — editable, required when the folder could not be located automatically */}
+          {fastqDir && (
+            <PathField
+              label={lang==='tr' ? 'FASTQ klasörünün tam yolu' : 'Full FASTQ folder path'}
+              value={fastqDir}
+              onChange={v => setFastqDir(v.trim())}
+              placeholder="/mnt/c/Users/.../FASTQ"
+            />
+          )}
 
           {/* Options row */}
           <div className={rp.optionsRow}>
@@ -588,14 +591,15 @@ export function RunPage() {
       {/* ── RUNNING / DONE ── */}
       {(running || status !== null) && (
         <div className={rp.runningLayout}>
-          <div className={`${rp.statusCard} ${status==='success'?rp.statusOk:status==='error'?rp.statusErr:rp.statusRunning}`}>
+          <div className={`${rp.statusCard} ${status==='success'?rp.statusOk:status==='error'?rp.statusErr:status==='stopped'?rp.statusStopped:rp.statusRunning}`}>
             <div className={rp.statusIcon}>
-              {running ? <div className={rp.bigSpinner}/> : status==='success' ? '✓' : '✗'}
+              {running ? <div className={rp.bigSpinner}/> : status==='success' ? '✓' : status==='stopped' ? '■' : '✗'}
             </div>
             <div className={rp.statusBody}>
               <div className={rp.statusTitle}>
                 {running?(lang==='tr'?'Analiz çalışıyor...':'Analysis running...'):
                  status==='success'?(lang==='tr'?'Analiz tamamlandı!':'Analysis complete!'):
+                 status==='stopped'?(lang==='tr'?'Analiz durduruldu':'Analysis stopped'):
                  (lang==='tr'?'Hata oluştu':'Error occurred')}
               </div>
               <div className={rp.statusSub}>
@@ -657,13 +661,14 @@ export function RunPage() {
                   <div className={rp.stepPills}>
                     {ALL_STEPS.map((def, i) => {
                       const s = stepList.find(x => x.key === def.key)
-                      const state = !s ? 'pending' : s.done ? 'done' : s.active ? 'active' : 'pending'
+                      const state = !s ? 'pending' : s.done ? 'done' : s.active ? 'active' : s.stopped ? 'stopped' : 'pending'
                       return (
-                        <div key={i} className={`${rp.pill} ${state==='done'?rp.pillDone:state==='active'?rp.pillActive:rp.pillPending}`}>
+                        <div key={i} className={`${rp.pill} ${state==='done'?rp.pillDone:state==='active'?rp.pillActive:state==='stopped'?rp.pillStopped:rp.pillPending}`}>
                           <span>{def.icon}</span>
                           <span className={rp.pillLabel}>{def.label}</span>
                           {state==='active' && <span className={rp.dotSpin} style={{display:'inline-block'}}/>}
                           {state==='done'   && <span className={rp.pillCheck}>✓</span>}
+                          {state==='stopped'&& <span className={rp.pillCheck}>■</span>}
                         </div>
                       )
                     })}
@@ -817,7 +822,7 @@ export function ResultsPage() {
 
   const openPopup=(key,rect)=>{
     const vals=[...new Set(merged.map(r=>{if(key==='type')return normType(r[key]);if(key==='chromosome')return normChr(r[key]);return String(r[key]??'')}).filter(Boolean))].sort()
-    setPopup({key,rect,vals,cur:colF[key]?new Set(colF[key]):new Set()})
+    setPopup({colKey:key,rect,vals,cur:colF[key]?new Set(colF[key]):new Set()})
   }
 
   const TT=({active,payload,label})=>active&&payload?.length?(<div style={{background:'#fff',border:'1px solid #dde2ec',borderRadius:8,padding:'8px 12px',fontSize:12,boxShadow:'0 4px 12px rgba(0,0,0,.1)'}}><div style={{fontWeight:600,marginBottom:3}}>{label}</div>{payload.map((p,i)=><div key={i} style={{color:p.fill}}>{p.name}: {p.value}</div>)}</div>):null
@@ -959,7 +964,7 @@ export function ResultsPage() {
         </div>
       )}
 
-      {popup&&<ColPopup {...popup} onApply={sel=>{setColF(f=>({...f,[popup.key]:sel}));setPopup(null)}} onClose={()=>setPopup(null)}/>}
+      {popup&&<ColPopup {...popup} onApply={sel=>{setColF(f=>({...f,[popup.colKey]:sel}));setPopup(null)}} onClose={()=>setPopup(null)}/>}
 
       {/* Notes */}
       <div className={re.notesCard}>
@@ -1013,7 +1018,7 @@ export function ResultsPage() {
   )
 }
 
-function ColPopup({key,rect,vals,cur,onApply,onClose}){
+function ColPopup({colKey,rect,vals,cur,onApply,onClose}){
   const [sel,setSel]=useState(new Set(cur))
   const [q,setQ]=useState('')
   const ref=useRef()
@@ -1024,7 +1029,7 @@ function ColPopup({key,rect,vals,cur,onApply,onClose}){
   const toggle=v=>setSel(s=>{const n=new Set(s);n.has(v)?n.delete(v):n.add(v);return n})
   return(
     <div className={re.popup} style={{left,top}} ref={ref}>
-      <div className={re.popHead}><span>{key}</span><button className={re.popX} onClick={onClose}>×</button></div>
+      <div className={re.popHead}><span>{colKey}</span><button className={re.popX} onClick={onClose}>×</button></div>
       <div className={re.popBody}>
         <input className={re.popSearch} placeholder="Ara / Search..." value={q} onChange={e=>setQ(e.target.value)} autoFocus/>
         <div className={re.popList}>{shown.map(v=><label key={v} className={re.popItem}><input type="checkbox" checked={sel.has(v)} onChange={()=>toggle(v)}/><span>{v||'—'}</span></label>)}</div>

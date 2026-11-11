@@ -29,7 +29,12 @@
     "appId": "com.cnvdetect.app",
     "productName": "CNVDetect",
     "directories": { "output": "dist-electron" },
-    "files": ["dist/**/*", "electron/**/*", "backend/**/*"],
+    "files": ["dist/**/*", "electron/**/*"],
+    "extraResources": [
+      { "from": "backend",  "to": "backend",  "filter": ["**/*", "!__pycache__/**", "!**/*.pyc"] },
+      { "from": "pipeline", "to": "pipeline" },
+      { "from": "config.json", "to": "config.json" }
+    ],
     "linux":   { "target": "AppImage", "category": "Science" },
     "mac":     { "target": "dmg" },
     "win":     { "target": "nsis" }

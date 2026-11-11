@@ -1,0 +1,7 @@
+# Files executed inside Linux/WSL/Docker must keep LF line endings,
+# otherwise bash fails with "$'\r': command not found".
+*.sh        text eol=lf
+*.py        text eol=lf
+Dockerfile  text eol=lf
+nginx.conf  text eol=lf
+*.yml       text eol=lf

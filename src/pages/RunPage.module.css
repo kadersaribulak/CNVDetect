@@ -66,6 +66,7 @@
 .statusRunning { background:var(--blue-light); border-color:var(--blue-mid); }
 .statusOk      { background:var(--ok-light);   border-color:var(--ok-mid); }
 .statusErr     { background:var(--del-light);   border-color:var(--del-mid); }
+.statusStopped { background:var(--surface2);    border-color:var(--border2); }
 
 .statusIcon { font-size:32px; flex-shrink:0; }
 .statusBody { flex:1; }
@@ -237,6 +238,7 @@
 .pillPending { background:var(--surface2); border-color:var(--border); color:var(--muted2); opacity:.55; }
 .pillActive  { background:var(--blue-light); border-color:var(--blue); color:var(--blue); font-weight:700; box-shadow:0 0 0 2px var(--blue-glow); }
 .pillDone    { background:var(--ok-light); border-color:var(--ok-mid); color:var(--ok); }
+.pillStopped { background:var(--surface2); border-color:var(--border2); color:var(--text2); font-weight:600; }
 .pillLabel   { max-width:80px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .pillCheck   { font-size:10px; }
 

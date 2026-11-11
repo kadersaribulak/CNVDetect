@@ -1,12 +1,38 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd, io, re, json, os, pathlib, asyncio, tempfile
-from collections import defaultdict
+import pandas as pd, io, re, json, os, pathlib, asyncio, tempfile, signal, glob
+import datetime as _dt
+import threading as _threading
+from urllib.parse import urlparse
 
 app = FastAPI(title="CNVDetect API", version="2.0.0")
 
+# ── CORS ─────────────────────────────────────────────────────────────────────
+# Only the local UI may call the API from a browser:
+#   - Vite dev server / local pages (http://localhost:<port>, http://127.0.0.1:<port>)
+#   - packaged Electron (file:// pages send Origin "null")
+# Behind nginx the UI is same-origin, so no CORS is needed there.
+_LOCAL_ORIGIN_RE = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["null"],
+    allow_origin_regex=_LOCAL_ORIGIN_RE,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+def _ws_origin_allowed(ws: WebSocket) -> bool:
+    """Browsers do not apply CORS to WebSockets, so check the Origin manually."""
+    origin = ws.headers.get("origin")
+    if not origin or origin == "null":
+        return True  # non-browser client or packaged Electron (file://)
+    if re.match(_LOCAL_ORIGIN_RE, origin):
+        return True
+    # Same-origin through a reverse proxy (nginx): Origin host == Host header
+    host = ws.headers.get("x-forwarded-host") or ws.headers.get("host", "")
+    return urlparse(origin).netloc == host
+
 # ── Pipeline Status Tracker ───────────────────────────────────────────────────
-import threading as _threading
 _pipeline_status = {
     "running": False, "output_dir": "", "prefix": "",
     "started_at": "", "last_log": "", "step": "", "steps_done": [],
@@ -30,7 +56,6 @@ async def pipeline_status_endpoint():
                     files.append(os.path.relpath(os.path.join(root,f), out))
         status["output_files"] = sorted(files)
     return status
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # ── Gene DB ─────────────────────────────────────────────────────────────────
 GENE_DB = {
@@ -43,7 +68,6 @@ GENE_DB = {
     "PTEN":("chr10",89622870,89731687),"ATM":("chr11",108093559,108239826),
     "CHEK2":("chr22",29083731,29137822),"PALB2":("chr16",23614403,23652631),
     "BRIP1":("chr17",59756481,60017818),"NBN":("chr8",90967711,91065088),
-    "MLH1":("chr3",37034841,37092337),"MSH2":("chr2",47630206,47789365),
   },
   "hg38": {
     "BRCA1":("chr17",43044295,43125483),"BRCA2":("chr13",32315474,32400266),
@@ -73,29 +97,37 @@ def _load_gene_db():
 
 ACTIVE_GENE_DB = _load_gene_db()
 
-# ── Institutional BED ────────────────────────────────────────────────────────
-_INST_BED_PATH = pathlib.Path(__file__).parent / "targets_merged.bed"
-
 # ── Config.json loader ────────────────────────────────────────────────────────
-_APP_ROOT = pathlib.Path(__file__).parent.parent  # CNVDetect_fixed/
+_APP_ROOT = pathlib.Path(__file__).resolve().parent.parent  # CNVDetect/
 _CONFIG_PATH = _APP_ROOT / "config.json"
 
+_CONFIG_DEFAULTS = {
+    "ref":         "reference/hg19.fasta",
+    "pipeline":    "pipeline/cnv_pipeline_last.sh",
+    "anno":        "backend/cnv_anotation.sh",
+    "instBed":     "backend/targets_merged.bed",
+    "classifyCNV": "tools/ClassifyCNV/ClassifyCNV.py",
+}
+
 def _load_config():
-    """Build config from relative paths inside CNVDetect folder.
-    All paths are relative to APP_ROOT — works on any machine."""
-    cfg = {
-        "ref":         str(_APP_ROOT / "reference" / "hg19.fasta"),
-        "pipeline":    str(_APP_ROOT / "pipeline"  / "cnv_pipeline_last.sh"),
-        "anno":        str(_APP_ROOT / "backend"   / "cnv_anotation.sh"),
-        "instBed":     str(_APP_ROOT / "backend"   / "targets_merged.bed"),
-        "classifyCNV": str(_APP_ROOT / "tools"     / "ClassifyCNV" / "ClassifyCNV.py"),
-    }
-    # Validate each path exists
-    for k, v in cfg.items():
-        if pathlib.Path(v).exists():
-            print(f"[CNVDetect] ✓ {k}: {v}")
+    """Read config.json (if present) and resolve every path relative to APP_ROOT.
+    Absolute paths in config.json are used as-is — works on any machine."""
+    raw = dict(_CONFIG_DEFAULTS)
+    if _CONFIG_PATH.exists():
+        try:
+            with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+                user_cfg = json.load(f)
+            raw.update({k: v for k, v in user_cfg.items() if k in _CONFIG_DEFAULTS and v})
+        except Exception as e:
+            print(f"[CNVDetect] Could not read config.json, using defaults: {e}")
+    cfg = {}
+    for k, v in raw.items():
+        p = pathlib.Path(v)
+        cfg[k] = str(p if p.is_absolute() else (_APP_ROOT / p).resolve())
+        if pathlib.Path(cfg[k]).exists():
+            print(f"[CNVDetect] ✓ {k}: {cfg[k]}")
         else:
-            print(f"[CNVDetect] ✗ {k} NOT FOUND: {v}")
+            print(f"[CNVDetect] ✗ {k} NOT FOUND: {cfg[k]}")
     return cfg
 
 APP_CONFIG = _load_config()
@@ -104,11 +136,15 @@ APP_CONFIG = _load_config()
 async def get_config():
     """Returns resolved app config paths for frontend."""
     return APP_CONFIG
+
+# ── Institutional BED ────────────────────────────────────────────────────────
+_INST_BED_PATH = pathlib.Path(APP_CONFIG["instBed"])
 _INST_BED = ""
 if _INST_BED_PATH.exists():
     _INST_BED = _INST_BED_PATH.read_text(encoding="utf-8").strip()
     print(f"[CNVDetect] Institutional BED loaded: {len(_INST_BED.splitlines())} regions")
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
 def nt(v):
     s=str(v or "").upper()
     if "DEL" in s: return "DEL"
@@ -117,10 +153,33 @@ def nt(v):
 
 def nc(v): return re.sub(r"^chr","",str(v or ""),flags=re.IGNORECASE).strip()
 
+def npos(v):
+    """Normalise a genomic position so '12345', '12345.0' and ' 12345 ' compare equal."""
+    s = str(v or "").strip()
+    try:
+        return str(int(round(float(s))))
+    except ValueError:
+        return s
+
 def parse(b):
     t=b.decode("utf-8",errors="replace")
     sep="\t" if "\t" in t.split("\n")[0] else ","
     return pd.read_csv(io.StringIO(t),sep=sep,dtype=str).fillna("")
+
+FASTQ_SUFFIXES = ["_L001_R1_001.fastq.gz", "_R1_001.fastq.gz", "_R1.fastq.gz"]
+
+def _scan_fastq_samples(folder):
+    """Return {sample_without_S##: full_sample_name} for R1 FASTQs in folder."""
+    found = {}
+    for pattern in ["*" + s for s in FASTQ_SUFFIXES]:
+        for f in glob.glob(os.path.join(folder, pattern)):
+            name = os.path.basename(f)
+            for suffix in FASTQ_SUFFIXES:
+                if name.endswith(suffix):
+                    full = name[:-len(suffix)]
+                    found[re.sub(r'_S\d+$', '', full)] = full
+                    break
+    return found
 
 # ── Basic endpoints ──────────────────────────────────────────────────────────
 @app.get("/health")
@@ -182,14 +241,18 @@ async def upload_anno(file:UploadFile=File(...)):
 @app.post("/api/merge")
 async def merge(payload:dict):
     base=payload.get("cnv",[]);anno=payload.get("annotation",[])
+    # Index annotation rows by Pool_ID + Chr + Start + Type (ignore Source — filenames differ).
+    # Start is normalised numerically: the annotation script rounds it with %.0f.
+    index={}
+    for a in anno:
+        key=(str(a.get("Pool_ID","")).strip(), nc(a.get("Chr","")),
+             npos(a.get("Start","")), nt(a.get("Type","")))
+        index.setdefault(key,a)
     merged=[];matched=0
     for r in base:
-        # Match on Pool_ID + Chr + Start + Type (ignore Source — filenames differ)
-        hit=next((a for a in anno
-            if str(a.get("Pool_ID","")).strip()==r["sample"]
-            and nc(a.get("Chr",""))==nc(r["chromosome"])
-            and str(a.get("Start","")).strip()==str(r.get("start","")).strip()
-            and nt(a.get("Type",""))==nt(r.get("type",""))),None)
+        key=(str(r.get("sample","")).strip(), nc(r.get("chromosome","")),
+             npos(r.get("start","")), nt(r.get("type","")))
+        hit=index.get(key)
         if hit: matched+=1
         merged.append({**r,
             "classification":hit.get("Classification","") if hit else "",
@@ -224,42 +287,50 @@ async def stats(payload:dict):
 # ── Pipeline runner ──────────────────────────────────────────────────────────
 @app.post("/api/pipeline/validate")
 async def validate_pipeline(payload: dict):
-    """Validate paths before running pipeline"""
+    """Validate paths before running pipeline. Script paths come from config.json only."""
     errors = []
     fastq_dir  = payload.get("fastqDir","")
     output_dir = payload.get("outputDir","")
-    ref        = payload.get("ref","")
     bed        = payload.get("bed","")
-    pipeline   = payload.get("pipelineScript","")
+    ref        = APP_CONFIG["ref"]
+    pipeline   = APP_CONFIG["pipeline"]
 
     if not fastq_dir:  errors.append("FASTQ dizini belirtilmedi")
+    elif not os.path.isabs(fastq_dir): errors.append(f"FASTQ dizini tam yol olmalı: {fastq_dir}")
     elif not os.path.isdir(fastq_dir): errors.append(f"FASTQ dizini bulunamadı: {fastq_dir}")
 
     if not output_dir: errors.append("Çıktı dizini belirtilmedi")
+    elif not os.path.isabs(output_dir): errors.append(f"Çıktı dizini tam yol olmalı: {output_dir}")
 
-    if ref and not os.path.isfile(ref): errors.append(f"Referans FASTA bulunamadı: {ref}")
+    if not os.path.isfile(ref): errors.append(f"Referans FASTA bulunamadı: {ref}")
 
     if bed:
         if not os.path.isfile(bed): errors.append(f"BED dosyası bulunamadı: {bed}")
     else:
         errors.append("BED dosyası belirtilmedi")
 
-    if pipeline and not os.path.isfile(pipeline):
+    if not os.path.isfile(pipeline):
         errors.append(f"Pipeline scripti bulunamadı: {pipeline}")
 
     return {"valid": len(errors)==0, "errors": errors}
 
 
 # ── Fast folder finder ──────────────────────────────────────────────────────
+# Large/system folders that never contain FASTQ runs — skipping them keeps the search fast
+_SKIP_DIRS = {"AppData", "node_modules", "site-packages", "$Recycle.Bin", "Windows",
+              "Program Files", "Program Files (x86)", "ProgramData", "__pycache__"}
+
 @app.get("/api/find-folder")
 async def find_folder(name: str, file: str = ""):
     """
     Find a folder by name. If a filename inside the folder is provided,
     use it to disambiguate between multiple matches.
     """
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return {"path": "", "name": name}
     try:
         home = str(pathlib.Path.home())
-    except:
+    except Exception:
         home = "/root"
 
     mnt_users = "/mnt/c/Users"
@@ -269,9 +340,8 @@ async def find_folder(name: str, file: str = ""):
             for user in os.listdir(mnt_users):
                 upath = os.path.join(mnt_users, user)
                 if os.path.isdir(upath):
-                    # Search deeper — up to 4 levels
                     roots.append(upath)
-        except:
+        except OSError:
             pass
     roots.append(home)
 
@@ -286,14 +356,18 @@ async def find_folder(name: str, file: str = ""):
                     continue
                 if entry.name == name:
                     candidates.append(entry.path)
-                elif depth < 4:
+                elif depth < 4 and not entry.name.startswith(".") and entry.name not in _SKIP_DIRS:
                     search(entry.path, depth + 1)
-        except PermissionError:
+        except OSError:
             pass
 
-    for root in roots:
-        if os.path.isdir(root):
-            search(root)
+    def run_search():
+        for root in roots:
+            if os.path.isdir(root):
+                search(root)
+
+    # Filesystem walk is blocking — keep it off the event loop
+    await asyncio.to_thread(run_search)
 
     if not candidates:
         return {"path": "", "name": name}
@@ -303,111 +377,149 @@ async def find_folder(name: str, file: str = ""):
         return {"path": candidates[0], "name": name}
 
     # Multiple matches — use file hint to pick the right one
-    if file:
-        for c in candidates:
-            if os.path.exists(os.path.join(c, file)):
-                return {"path": c, "name": name}
+    if file and "/" not in file and "\\" not in file:
+        hits = [c for c in candidates if os.path.exists(os.path.join(c, file))]
+        if len(hits) == 1:
+            return {"path": hits[0], "name": name}
+        if hits:
+            candidates = hits
 
-    # Return deepest path (most specific) as best guess
+    # Still ambiguous — return the most specific path; the UI lets the user edit it
     candidates.sort(key=lambda p: p.count('/'), reverse=True)
-    return {"path": candidates[0], "name": name}
+    return {"path": candidates[0], "name": name, "ambiguous": True}
 
 # ── Detect sample names from FASTQ folder ───────────────────────────────────
 @app.get("/api/detect-samples")
 async def detect_samples(folder: str):
     """Scan a FASTQ folder and return detected sample names (without _L001_R1_001 suffix)."""
-    if not os.path.isdir(folder):
+    if not os.path.isabs(folder) or not os.path.isdir(folder):
         return {"samples": [], "error": f"Folder not found: {folder}"}
-    import glob
-    samples = []
-    import re as _re
-    for pattern in ["*_L001_R1_001.fastq.gz", "*_R1_001.fastq.gz", "*_R1.fastq.gz"]:
-        for f in glob.glob(os.path.join(folder, pattern)):
-            name = os.path.basename(f)
-            for suffix in ["_L001_R1_001.fastq.gz", "_R1_001.fastq.gz", "_R1.fastq.gz"]:
-                if name.endswith(suffix):
-                    sample = name[:-len(suffix)]
-                    # Strip _S## suffix (e.g. R462-POOL-37_S37 → R462-POOL-37)
-                    sample = _re.sub(r'_S\d+$', '', sample)
-                    samples.append(sample)
-                    break
-    return {"samples": sorted(set(samples))}
+    return {"samples": sorted(_scan_fastq_samples(folder).keys())}
+
+# ── Process helpers ─────────────────────────────────────────────────────────
+# Start child processes in their own session so the whole tree (bwa, samtools, R…) can be killed
+_SESSION_KW = {"start_new_session": True} if os.name == "posix" else {}
+
+def _kill_proc(proc):
+    if proc is None or proc.returncode is not None:
+        return
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGTERM)
+        else:
+            proc.terminate()
+    except ProcessLookupError:
+        pass
+    except Exception:
+        try: proc.kill()
+        except Exception: pass
+
+def _safe_prefix(v):
+    return re.sub(r"[^\w.-]", "_", str(v or "").strip()) or "analiz"
 
 # ── Pipeline WebSocket ───────────────────────────────────────────────────────
 @app.websocket("/ws/pipeline")
 async def run_pipeline(ws: WebSocket):
+    if not _ws_origin_allowed(ws):
+        await ws.close(code=1008)
+        return
     await ws.accept()
+
+    state = {"proc": None, "stopped": False}
+    tmp_files = []
+    watcher = None
+    owns_status = False
+
+    async def send(obj):
+        """Send to the client; a failed send means the client is gone → stop work."""
+        try:
+            await ws.send_json(obj)
+            return True
+        except Exception:
+            state["stopped"] = True
+            _kill_proc(state["proc"])
+            return False
+
     try:
-        raw = await ws.receive_text()
-        cfg = json.loads(raw)
+        cfg = json.loads(await ws.receive_text())
 
-        fastq_dir   = cfg.get("fastqDir", "")
-        output_dir  = cfg.get("outputDir", "")
-        prefix      = cfg.get("prefix", "analiz")
-        ref         = cfg.get("ref", "")
-        bed         = cfg.get("bed", "")
-        genders     = cfg.get("genders", "")
+        with _status_lock:
+            if _pipeline_status["running"]:
+                busy = True
+            else:
+                busy = False
+                _pipeline_status["running"] = True
+        if busy:
+            await send({"type": "error", "msg": "Zaten çalışan bir analiz var. Bitmesini bekleyin veya durdurun."})
+            return
+        owns_status = True
+
+        # Script and reference paths come ONLY from config.json — never from the client
+        pipeline    = APP_CONFIG["pipeline"]
+        anno_script = APP_CONFIG["anno"]
+        classify_py = APP_CONFIG["classifyCNV"]
+        ref         = APP_CONFIG["ref"]
+
+        fastq_dir   = str(cfg.get("fastqDir", "")).strip()
+        output_dir  = str(cfg.get("outputDir", "")).strip()
+        prefix      = _safe_prefix(cfg.get("prefix", "analiz"))
+        bed         = str(cfg.get("bed", "")).strip()
+        bed_text    = cfg.get("bedText", "")
+        genders     = str(cfg.get("genders", "")).strip()
         genders_text = cfg.get("gendersText", "")
+        do_anno     = bool(cfg.get("doAnno", True))
+        keep_bams   = bool(cfg.get("keepBams", False))
+        try:
+            threads = max(1, min(64, int(cfg.get("threads", 5))))
+        except (TypeError, ValueError):
+            threads = 5
 
-        # If genders content sent inline, write to tmp file
-        if genders_text and (not genders or genders.startswith('inline:')):
-            import re as _re, glob as _glob
-            # Try to match genders pool IDs to actual FASTQ sample names
+        # Only the institutional BED may be referenced by path; anything else is sent as text
+        if bed and os.path.realpath(bed) != os.path.realpath(APP_CONFIG["instBed"]):
+            bed = ""
+        if not bed and bed_text:
+            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".bed", delete=False, prefix="cnvdetect_")
+            tmp.write(bed_text if bed_text.endswith("\n") else bed_text + "\n")
+            tmp.close()
+            tmp_files.append(tmp.name)
+            bed = tmp.name
+            await send({"type": "info", "msg": f"BED geçici dosyaya yazıldı: {bed}"})
+
+        # Genders file given as a path must exist; otherwise inline content is used
+        if genders and (genders.startswith("inline:") or not os.path.isfile(genders)):
+            genders = ""
+        if genders_text and not genders:
+            # Match genders pool IDs to actual FASTQ sample names
             lines = genders_text.strip().split('\n')
             header = lines[0] if lines else 'Pool\tGender'
-            data_lines = lines[1:] if len(lines) > 1 else []
-
-            # Scan FASTQ folder for real sample names
-            fastq_samples = {}  # pool_id_stripped -> full_sample_name
-            if fastq_dir and os.path.isdir(fastq_dir):
-                for pattern in ["*_L001_R1_001.fastq.gz", "*_R1_001.fastq.gz", "*_R1.fastq.gz"]:
-                    for f in _glob.glob(os.path.join(fastq_dir, pattern)):
-                        bname = os.path.basename(f)
-                        for sfx in ["_L001_R1_001.fastq.gz", "_R1_001.fastq.gz", "_R1.fastq.gz"]:
-                            if bname.endswith(sfx):
-                                full = bname[:-len(sfx)]
-                                stripped = _re.sub(r'_S\d+$', '', full)
-                                fastq_samples[stripped] = full
-                                break
-
+            fastq_samples = _scan_fastq_samples(fastq_dir) if os.path.isdir(fastq_dir) else {}
             resolved_lines = [header]
-            for line in data_lines:
+            for line in lines[1:]:
                 parts = line.split('\t')
                 if len(parts) >= 2:
                     pool_id, gender = parts[0].strip(), parts[1].strip()
-                    # Use full FASTQ sample name if available
-                    real_id = fastq_samples.get(pool_id, pool_id)
-                    resolved_lines.append(f"{real_id}\t{gender}")
-
+                    resolved_lines.append(f"{fastq_samples.get(pool_id, pool_id)}\t{gender}")
             tmp_g = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, prefix="cnvdetect_genders_")
             tmp_g.write('\n'.join(resolved_lines) + '\n')
             tmp_g.close()
+            tmp_files.append(tmp_g.name)
             genders = tmp_g.name
-        pipeline    = cfg.get("pipelineScript", "")
-        do_anno     = cfg.get("doAnno", True)
-        anno_script = cfg.get("annoScript", "")
-        threads     = int(cfg.get("threads", 5))
-        keep_bams   = cfg.get("keepBams", False)
-        bed_text    = cfg.get("bedText", "")
 
-        if not bed and bed_text:
-            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".bed", delete=False, prefix="cnvdetect_")
-            tmp.write(bed_text)
-            tmp.close()
-            bed = tmp.name
-            await ws.send_json({"type": "info", "msg": f"BED geçici dosyaya yazıldı: {bed}"})
-
-        if not all([fastq_dir, output_dir, ref, bed, pipeline]):
-            missing = [
-                k for k, v in [
-                    ("FASTQ", fastq_dir),
-                    ("Output", output_dir),
-                    ("Ref", ref),
-                    ("BED", bed),
-                    ("Pipeline", pipeline),
-                ] if not v
-            ]
-            await ws.send_json({"type": "error", "msg": f"Eksik parametreler: {', '.join(missing)}"})
+        # ── Validation ──
+        errors = []
+        if not fastq_dir or not os.path.isabs(fastq_dir) or not os.path.isdir(fastq_dir):
+            errors.append(f"FASTQ klasörü bulunamadı (tam yol gerekli): {fastq_dir or '-'}")
+        if not output_dir or not os.path.isabs(output_dir):
+            errors.append(f"Çıktı klasörü tam yol olmalı: {output_dir or '-'}")
+        if not bed:
+            errors.append("BED belirtilmedi")
+        if not os.path.isfile(ref):
+            errors.append(f"Referans FASTA bulunamadı: {ref}")
+        if not os.path.isfile(pipeline):
+            errors.append(f"Pipeline scripti bulunamadı: {pipeline}")
+        if errors:
+            for e in errors:
+                await send({"type": "error", "msg": e})
             return
 
         cmd = [
@@ -424,27 +536,48 @@ async def run_pipeline(ws: WebSocket):
         if keep_bams:
             cmd += ["--keep-bams"]
 
-        import datetime as _dt
         _update_status(running=True, output_dir=output_dir, prefix=prefix,
                        started_at=_dt.datetime.now().isoformat(), step="starting", steps_done=[], last_log="")
-        await ws.send_json({"type": "info", "msg": "▶ Pipeline başlatılıyor..."})
-        await ws.send_json({"type": "cmd", "msg": " ".join(cmd)})
+        await send({"type": "info", "msg": "▶ Pipeline başlatılıyor..."})
+        await send({"type": "cmd", "msg": " ".join(cmd)})
 
         os.makedirs(output_dir, exist_ok=True)
 
-        proc = await asyncio.create_subprocess_exec(
+        # Watch the socket: a "stop" message or a disconnect kills the running process tree
+        async def _watch():
+            try:
+                while True:
+                    msg = await ws.receive()
+                    if msg.get("type") == "websocket.disconnect":
+                        break
+                    text = msg.get("text")
+                    if text:
+                        try:
+                            if json.loads(text).get("action") == "stop":
+                                break
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            state["stopped"] = True
+            _kill_proc(state["proc"])
+        watcher = asyncio.create_task(_watch())
+
+        state["proc"] = proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=os.path.dirname(pipeline) or ".",
+            **_SESSION_KW,
         )
 
-        last_ping = asyncio.get_event_loop().time()
+        loop = asyncio.get_running_loop()
+        last_ping = loop.time()
         async for line in proc.stdout:
             text = line.decode("utf-8", "replace").rstrip()
             if text:
-                await ws.send_json({"type": "log", "msg": text})
-                # Update status tracker
+                if not await send({"type": "log", "msg": text}):
+                    break
                 step = _pipeline_status.get("step", "")
                 if "STEP 1" in text: step = "Alignment"
                 elif "STEP 2" in text: step = "CNVkit"
@@ -455,79 +588,80 @@ async def run_pipeline(ws: WebSocket):
                 elif "Processing Female" in text: step = "Female-Alignment"
                 elif "Run complete" in text or "Pipeline finished" in text: step = "Done"
                 _update_status(last_log=text[:200], step=step)
-            # Send keepalive ping every 30 seconds to prevent timeout
-            now = asyncio.get_event_loop().time()
+            # Keepalive ping every 30 seconds to prevent proxy timeouts
+            now = loop.time()
             if now - last_ping > 30:
-                try:
-                    await ws.send_json({"type": "ping", "msg": "..."})
-                    last_ping = now
-                except:
+                if not await send({"type": "ping", "msg": "..."}):
                     break
+                last_ping = now
 
         retcode = await proc.wait()
+        state["proc"] = None
 
-        # Run annotation regardless of retcode if pipeline produced output dirs
-        # Also collect consensus files from Male/Female/All subfolders
+        if state["stopped"]:
+            _update_status(running=False, step="stopped")
+            await send({"type": "error", "msg": "■ Analiz kullanıcı tarafından durduruldu."})
+            return
+
+        # Annotation runs on every folder that contains a consensus file
         anno_dirs = []
-        if do_anno and anno_script and os.path.isfile(anno_script):
-            if genders:
-                for sub in ["Male", "Female", "All"]:
-                    d = os.path.join(output_dir, sub)
-                    if os.path.isdir(d):
-                        # Check if consensus file exists in this subdir
-                        consensus_files = [
-                            f for f in os.listdir(d)
-                            if f.endswith("_consensus_cnvs.tsv")
-                        ]
-                        if consensus_files:
-                            anno_dirs.append(d)
-            else:
-                consensus_files = [
-                    f for f in os.listdir(output_dir)
-                    if f.endswith("_consensus_cnvs.tsv")
-                ] if os.path.isdir(output_dir) else []
-                if consensus_files:
-                    anno_dirs = [output_dir]
+        if do_anno and os.path.isfile(anno_script):
+            candidate_dirs = [os.path.join(output_dir, s) for s in ["Male", "Female", "All"]] if genders else [output_dir]
+            for d in candidate_dirs:
+                if os.path.isdir(d) and any(f.endswith("_consensus_cnvs.tsv") for f in os.listdir(d)):
+                    anno_dirs.append(d)
 
         if retcode == 0:
-            await ws.send_json({"type": "success", "msg": "✓ Pipeline tamamlandı!"})
+            await send({"type": "success", "msg": "✓ Pipeline tamamlandı!"})
         else:
-            await ws.send_json({"type": "warning", "msg": f"⚠ Pipeline hata koduyla bitti ({retcode}) — annotation yine de deneniyor."})
+            await send({"type": "warning", "msg": f"⚠ Pipeline hata koduyla bitti ({retcode}) — annotation yine de deneniyor."})
 
         if anno_dirs:
-            await ws.send_json({"type": "info", "msg": f"▶ Annotation başlatılıyor... ({len(anno_dirs)} klasör)"})
+            _update_status(step="Annotation")
+            await send({"type": "info", "msg": f"▶ Annotation başlatılıyor... ({len(anno_dirs)} klasör)"})
+            # Paths are passed as positional args ($0 $1 $2) — never interpolated into the shell string
+            anno_shell = (
+                'if command -v conda >/dev/null 2>&1; then '
+                'source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate cnv_pipeline; '
+                'fi; exec bash "$0" "$1" "$2"'
+            )
             for d in anno_dirs:
-                await ws.send_json({"type": "log", "msg": f"  📂 Annotation: {os.path.basename(d)}"})
-                conda_run = f"source $(conda info --base)/etc/profile.d/conda.sh && conda activate cnv_pipeline && bash {anno_script} {d}"
+                if state["stopped"]:
+                    break
+                await send({"type": "log", "msg": f"  📂 Annotation: {os.path.basename(d)}"})
                 try:
-                    aproc = await asyncio.create_subprocess_exec(
-                        "bash", "-c", conda_run,
+                    state["proc"] = aproc = await asyncio.create_subprocess_exec(
+                        "bash", "-c", anno_shell, anno_script, d, classify_py,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.STDOUT,
+                        **_SESSION_KW,
                     )
                     async for line in aproc.stdout:
                         line_text = line.decode("utf-8", "replace").rstrip()
-                        if line_text:
-                            await ws.send_json({"type": "log", "msg": line_text})
+                        if line_text and not await send({"type": "log", "msg": line_text}):
+                            break
                     await aproc.wait()
+                    state["proc"] = None
                 except Exception as ae:
-                    await ws.send_json({"type": "warning", "msg": f"Annotation hatası ({os.path.basename(d)}): {ae}"})
+                    await send({"type": "warning", "msg": f"Annotation hatası ({os.path.basename(d)}): {ae}"})
+
+            if state["stopped"]:
+                _update_status(running=False, step="stopped")
+                return
 
             # Collect all summary reports from root and subfolders
             found_summaries = []
+            seen = set()
             root_summary = os.path.join(output_dir, "CNV_Final_Summary_Report.tsv")
-            if os.path.isfile(root_summary):
-                found_summaries.append(("All", root_summary))
-            for d in anno_dirs:
-                s = os.path.join(d, "CNV_Final_Summary_Report.tsv")
-                if os.path.isfile(s):
-                    found_summaries.append((os.path.basename(d), s))
+            for label, s in [("All", root_summary)] + [(os.path.basename(d), os.path.join(d, "CNV_Final_Summary_Report.tsv")) for d in anno_dirs]:
+                if os.path.isfile(s) and os.path.realpath(s) not in seen:
+                    seen.add(os.path.realpath(s))
+                    found_summaries.append((label, s))
 
             if found_summaries:
-                await ws.send_json({"type": "info", "msg": f"📊 {len(found_summaries)} summary birleştiriliyor..."})
+                await send({"type": "info", "msg": f"📊 {len(found_summaries)} summary birleştiriliyor..."})
                 try:
-                    import pandas as pd
-                    prefix_name = os.path.basename(output_dir)
+                    prefix_name = os.path.basename(output_dir.rstrip("/"))
                     merged_xlsx = os.path.join(output_dir, f"{prefix_name}_CNV_Final_Report.xlsx")
                     merged_tsv  = os.path.join(output_dir, f"{prefix_name}_CNV_Final_Report.tsv")
 
@@ -547,27 +681,41 @@ async def run_pipeline(ws: WebSocket):
                             if not sub.empty:
                                 sub.to_excel(writer, sheet_name=label[:31], index=False)
 
-                    await ws.send_json({"type": "success", "msg": f"✓ Annotation tamamlandı! → {merged_xlsx}"})
+                    await send({"type": "success", "msg": f"✓ Annotation tamamlandı! → {merged_xlsx}"})
                 except Exception as me:
-                    await ws.send_json({"type": "warning", "msg": f"⚠ Excel birleştirme hatası: {me}"})
+                    await send({"type": "warning", "msg": f"⚠ Excel birleştirme hatası: {me}"})
                     for label, s in found_summaries:
-                        await ws.send_json({"type": "info", "msg": f"  → {label}: {s}"})
+                        await send({"type": "info", "msg": f"  → {label}: {s}"})
             else:
-                await ws.send_json({"type": "info", "msg": "⚠ Annotation summary bulunamadı."})
-        elif do_anno and anno_script:
-            await ws.send_json({"type": "warning", "msg": "⚠ Annotation: consensus dosyası bulunamadı, annotation atlandı."})
+                await send({"type": "info", "msg": "⚠ Annotation summary bulunamadı."})
+        elif do_anno:
+            if not os.path.isfile(anno_script):
+                await send({"type": "warning", "msg": f"⚠ Annotation scripti bulunamadı: {anno_script}"})
+            else:
+                await send({"type": "warning", "msg": "⚠ Annotation: consensus dosyası bulunamadı, annotation atlandı."})
 
         if retcode != 0:
-            await ws.send_json({"type": "error", "msg": f"✗ Pipeline hata kodu: {retcode}"})
+            await send({"type": "error", "msg": f"✗ Pipeline hata kodu: {retcode}"})
 
-        _update_status(running=False, step="completed")
-        await ws.send_json({"type": "done", "msg": "Tüm işlemler tamamlandı.", "outputDir": output_dir})
+        _update_status(running=False, step="completed" if retcode == 0 else "failed")
+        await send({"type": "done", "msg": "Tüm işlemler tamamlandı.", "outputDir": output_dir})
 
     except WebSocketDisconnect:
-        pass
+        state["stopped"] = True
     except Exception as e:
-        try:
-            await ws.send_json({"type": "error", "msg": f"✗ Hata: {str(e)}"})
-        except:
-            pass
-
+        await send({"type": "error", "msg": f"✗ Hata: {str(e)}"})
+    finally:
+        if watcher:
+            watcher.cancel()
+        _kill_proc(state["proc"])
+        if owns_status:
+            with _status_lock:
+                if _pipeline_status["running"]:
+                    _pipeline_status["running"] = False
+                    _pipeline_status["step"] = "stopped" if state["stopped"] else "failed"
+        for f in tmp_files:
+            try: os.remove(f)
+            except OSError: pass
+        # Close explicitly so the client gets onclose right away
+        try: await ws.close()
+        except Exception: pass

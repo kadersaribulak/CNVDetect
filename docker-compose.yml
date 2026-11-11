@@ -3,3 +3,7 @@ services:
     build: .
     ports: ["3001:80"]
     restart: unless-stopped
+    # The backend runs on the host (it needs bwa/CNVkit/R and the FASTQ folders).
+    # Start it with:  cd backend && uvicorn main:app --host 0.0.0.0 --port 8765
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -11,10 +11,22 @@ function startBackend() {
     ? path.join(__dirname, '..', 'backend')
     : path.join(process.resourcesPath, 'backend')
   const py = process.platform === 'win32' ? 'python' : 'python3'
+  if (!fs.existsSync(path.join(backendDir, 'main.py'))) {
+    dialog.showErrorBox('CNVDetect', `Backend bulunamadı:\n${backendDir}`)
+    return
+  }
   backend = spawn(py, ['-m', 'uvicorn', 'main:app', '--port', '8765', '--host', '127.0.0.1'], {
     cwd: backendDir, stdio: 'pipe'
   })
+  backend.stdout.on('data', d => console.log('[backend]', d.toString()))
   backend.stderr.on('data', d => console.log('[backend]', d.toString()))
+  backend.on('error', err => {
+    // Python (or uvicorn) is not installed on this machine
+    dialog.showErrorBox('CNVDetect',
+      `Backend başlatılamadı (${py}): ${err.message}\n\n` +
+      `Python 3 ve "pip install -r backend/requirements.txt" gereklidir.`)
+    backend = null
+  })
 }
 
 function createWindow() {

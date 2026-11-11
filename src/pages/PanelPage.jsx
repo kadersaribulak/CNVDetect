@@ -6,9 +6,11 @@ import { useLang } from '../hooks/useLang'
 import { saveFilePath, writeToDisk } from '../hooks/useElectron'
 import { PANEL_GENES } from '../i18n/translations'
 import { WizardLayout, Btn, Tag, SectionCard } from '../components/UI'
+import { API } from '../api'
 import s from './PanelPage.module.css'
 
-const API = window.location.origin === 'null' ? 'http://localhost:8765' : window.location.origin
+// Marker stored in bedPath when the server-side institutional BED is used
+export const INSTITUTIONAL_BED_MARKER = 'institutional:targets_merged'
 
 export default function PanelPage() {
   const { genome, setGenome, genes, setGenes, padding, setPadding,
@@ -29,6 +31,7 @@ export default function PanelPage() {
   const [instLoading,   setInstLoading]   = useState(false)
   const inputRef  = useRef()
   const dropRef   = useRef()
+  const bedReqId  = useRef(0)  // ignore out-of-order BED generation responses
 
   const panels = PANEL_GENES[lang] || PANEL_GENES.tr
 
@@ -42,15 +45,18 @@ export default function PanelPage() {
     const q = val.trim().toUpperCase()
     setSuggest(q.length >= 2 ? allGenes.filter(g => g.startsWith(q) && !genes.includes(g)).slice(0, 7) : [])
   }
-  const autoGenBed = async (geneList) => {
+  const autoGenBed = async (geneList, pad = padding) => {
     const list = geneList || genes
+    const reqId = ++bedReqId.current
     // If no genes but we have extraBedLines (institutional/upload), just use those
     if (!list || !list.length) {
-      if (extraBedLines) setBedText(extraBedLines)
+      setBedText(extraBedLines || '')
+      setBedMissing([])
       return
     }
     try {
-      const { data } = await axios.post(`${API}/api/bed/generate`, { genes: list, build: genome, padding })
+      const { data } = await axios.post(`${API}/api/bed/generate`, { genes: list, build: genome, padding: pad })
+      if (reqId !== bedReqId.current) return  // a newer request superseded this one
       // Merge: extra BED (institutional/upload) + generated gene BED, deduplicated by chr:start:end
       const existingLines = new Set((extraBedLines || '').split('\n').filter(Boolean))
       const newLines = data.bed.split('\n').filter(Boolean)
@@ -88,13 +94,15 @@ export default function PanelPage() {
     const newGenes = [...new Set([...genes, ...gl])]
     setGenes(newGenes)
     setSelPanel('')
-    // Auto-generate BED
-    if (newGenes.length) {
-      try {
-        const { data } = await axios.post(`${API}/api/bed/generate`, { genes: newGenes, build: genome, padding })
-        setBedText(data.bed); setBedMissing(data.missing || [])
-      } catch (e) { console.error(e) }
-    }
+    // Auto-generate BED (also updates bedPath so the run step uses this BED)
+    await autoGenBed(newGenes)
+  }
+
+  // Reset every panel/BED source
+  const clearPanel = () => {
+    bedReqId.current++
+    setGenes([]); setBedText(''); setBedMissing([]); setBedPath('')
+    setExtraBedLines(''); setUploadedBed(''); setUploadedName('')
   }
 
   // Institutional panel
@@ -106,7 +114,9 @@ export default function PanelPage() {
       setUploadedBed(data.bed)
       setExtraBedLines(data.bed)  // keep as base for merging
       setUploadedName(`Kurumsal Panel (${data.regions} bölge)`)
-      setBedPath('/mnt/c/Users/kader.saribulak/Desktop/CNVDetect/backend/targets_merged.bed')
+      setGenes([])  // institutional panel replaces any gene-based BED
+      bedReqId.current++
+      setBedPath(INSTITUTIONAL_BED_MARKER)
       setBedMissing([])
     } catch (e) {
       console.error(e)
@@ -120,6 +130,8 @@ export default function PanelPage() {
     const reader = new FileReader()
     reader.onload = ev => {
       const bedContent = ev.target.result.trim()
+      setGenes([])  // uploaded BED replaces any gene-based BED
+      bedReqId.current++
       setUploadedBed(bedContent)
       setUploadedName(file.name)
       setBedText(bedContent)
@@ -180,7 +192,7 @@ export default function PanelPage() {
             <div className={s.genomeBtns}>
               {['hg19','hg38'].map(b => (
                 <button key={b} className={`${s.gBtn} ${genome===b?s.gActive:''}`}
-                  onClick={() => { setGenome(b); setGenes([]); setBedText(''); setUploadedBed(''); setUploadedName('') }}>
+                  onClick={() => { setGenome(b); clearPanel() }}>
                   <span className={s.gName}>{b}</span>
                   <span className={s.gSub}>{b==='hg19'?'GRCh37':'GRCh38'}</span>
                 </button>
@@ -254,7 +266,7 @@ export default function PanelPage() {
                     <Btn variant="default" size="sm" onClick={() => applyPanel(selPanel)}>
                       {lang==='tr' ? 'Genleri Listeye Ekle' : 'Add to List'}
                     </Btn>
-                    <Btn variant="primary" size="sm" onClick={() => { applyPanel(selPanel); setTimeout(handleGenerateBed, 100) }} disabled={busy.bed}>
+                    <Btn variant="primary" size="sm" onClick={() => applyPanel(selPanel)} disabled={busy.bed}>
                       {busy.bed ? '...' : (lang==='tr' ? 'BED Oluştur →' : 'Generate BED →')}
                     </Btn>
                   </div>
@@ -265,7 +277,7 @@ export default function PanelPage() {
                   <span className={s.currentGenesLabel}>
                     {lang==='tr' ? `Mevcut liste: ${genes.length} gen` : `Current list: ${genes.length} genes`}
                   </span>
-                  <button className={s.clearAll} onClick={() => { setGenes([]); setBedText(''); setBedMissing([]) }}>
+                  <button className={s.clearAll} onClick={clearPanel}>
                     {t.panel.clearAll}
                   </button>
                 </div>
@@ -321,7 +333,7 @@ export default function PanelPage() {
                     : "Henüz gen eklenmedi — panel seç veya gen ekle"}
                 </span>
                 {genes.length > 0 && (
-                  <button className={s.clearAll} onClick={() => { setGenes([]); setBedText(''); setBedMissing([]) }}>
+                  <button className={s.clearAll} onClick={clearPanel}>
                     {t.panel.clearAll}
                   </button>
                 )}
@@ -341,7 +353,7 @@ export default function PanelPage() {
                   <div className={s.paddingRow}>
                     <span className={s.paddingLabel}>{t.panel.padding} — <b>{padding} bp</b></span>
                     <input type="range" min="0" max="500" step="10" value={padding}
-                      onChange={e => { const p=+e.target.value; setPadding(p); if(genes.length) setTimeout(()=>autoGenBed(genes),0) }}
+                      onChange={e => { const p=+e.target.value; setPadding(p); if(genes.length) autoGenBed(genes, p) }}
                       className={s.sliderInline}/>
                   </div>
                   <Btn variant="primary" size="lg" className={s.genBtn}
@@ -373,7 +385,7 @@ export default function PanelPage() {
                     <div className={s.dropLoadedName}>{uploadedName}</div>
                     <div className={s.dropLoadedCount}>{lineCount} {lang==='tr' ? 'bölge' : 'regions'}</div>
                     <button className={s.dropClear}
-                      onClick={e => { e.stopPropagation(); setUploadedBed(''); setUploadedName(''); setBedText(''); setExtraBedLines('') }}>
+                      onClick={e => { e.stopPropagation(); clearPanel() }}>
                       <X size={12}/> {lang==='tr' ? 'Kaldır' : 'Remove'}
                     </button>
                   </>

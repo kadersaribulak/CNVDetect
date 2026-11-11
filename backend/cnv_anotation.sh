@@ -1,12 +1,25 @@
 #!/bin/bash
 
-CLASSIFY_PY_PATH="$HOME/ClassifyCNV/ClassifyCNV.py"
-GENOME_BUILD="hg19"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GENOME_BUILD="${GENOME_BUILD:-hg19}"
 
 if [ -z "$1" ]; then
-    echo "Kullanim: ./cnv_annotation.sh /dosyalarin/oldugu/dizin"
+    echo "Kullanim: ./cnv_anotation.sh /dosyalarin/oldugu/dizin [/yol/ClassifyCNV.py]"
     exit 1
 fi
+
+# ClassifyCNV yolu: 2. arguman > CLASSIFY_PY_PATH ortam degiskeni > proje tools/ klasoru > $HOME
+CLASSIFY_PY_PATH="${2:-${CLASSIFY_PY_PATH:-}}"
+if [ -z "$CLASSIFY_PY_PATH" ] || [ ! -f "$CLASSIFY_PY_PATH" ]; then
+    for cand in "$SCRIPT_DIR/../tools/ClassifyCNV/ClassifyCNV.py" "$HOME/ClassifyCNV/ClassifyCNV.py"; do
+        if [ -f "$cand" ]; then CLASSIFY_PY_PATH="$cand"; break; fi
+    done
+fi
+if [ ! -f "$CLASSIFY_PY_PATH" ]; then
+    echo "!! HATA: ClassifyCNV.py bulunamadi (tools/ClassifyCNV/ veya \$HOME/ClassifyCNV/ altina kurun)."
+    exit 1
+fi
+echo "ClassifyCNV: $CLASSIFY_PY_PATH"
 
 # Windows path uyumluluğu için cd ile absolute path al
 cd "$1" || { echo "HATA: Dizine girilemedi: $1"; exit 1; }

@@ -20,5 +20,6 @@ logs/
 tmp_fastq*/
 *.bam
 *.bai
+.claude/settings.local.json
 .DS_Store
 Thumbs.db
