@@ -23,3 +23,6 @@ tmp_fastq*/
 .claude/settings.local.json
 .DS_Store
 Thumbs.db
+
+# Institutional panel BED — not published (requires institutional approval)
+backend/targets_merged.bed

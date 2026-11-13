@@ -30,7 +30,7 @@ No matched normal samples are required. The interface is available in English an
 ## Features
 
 - **Panel / BED builder**
-  - Institutional panel: 141 genes, 1,929 target regions, hg19
+  - Institutional panel: loads a fixed in-house BED from the server (`backend/targets_merged.bed`, not included in the repository; see [Configuration](#configuration))
   - Clinical preset panels, or a custom panel built from gene names, with automatic BED generation and adjustable padding (hg19 / hg38)
   - Upload your own BED file
 - **Sex stratification** — male and female samples are analysed separately (chrY excluded for females; X/Y excluded in the combined analysis). Sample names are detected automatically from the FASTQ folder.
@@ -197,6 +197,8 @@ Settings are stored in `config.json`. Paths are relative to the project root; ab
 }
 ```
 
+`instBed` is optional. The in-house panel BED is not distributed with the repository. To use the **Institutional panel** option, place your own panel BED at `backend/targets_merged.bed`, or point `instBed` to it. Without it, the other panel options (presets, gene names, BED upload) work as usual.
+
 ## Running the pipeline from the command line
 
 The pipeline can also be used without the interface:
@@ -207,7 +209,7 @@ bash pipeline/cnv_pipeline_last.sh \
     --output  /path/to/CNV_output \
     --prefix  cohort_A \
     --ref     reference/hg19.fasta \
-    --bed     backend/targets_merged.bed \
+    --bed     /path/to/panel_targets.bed \
     --genders genders.txt \
     --threads 8
 
@@ -225,7 +227,7 @@ CNVDetect/
 │   ├── cnv_anotation.sh        # Classification with ClassifyCNV
 │   ├── download_genes.py       # Builds the gene coordinate DB from UCSC refGene
 │   ├── genes_db.json           # hg19 / hg38 gene coordinates
-│   └── targets_merged.bed      # Institutional panel
+│   └── targets_merged.bed      # (not in the repo) optional in-house panel BED
 ├── pipeline/
 │   └── cnv_pipeline_last.sh    # BWA → Picard → CNVkit + ExomeDepth → Consensus
 ├── src/                        # React frontend (pages, components, EN/TR translations)
