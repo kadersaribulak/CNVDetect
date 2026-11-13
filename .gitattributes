@@ -5,3 +5,6 @@
 Dockerfile  text eol=lf
 nginx.conf  text eol=lf
 *.yml       text eol=lf
+# Data files read by bash/awk/R in Linux: a trailing \r would end up in the end coordinate or name
+*.bed       text eol=lf
+*.tsv       text eol=lf
