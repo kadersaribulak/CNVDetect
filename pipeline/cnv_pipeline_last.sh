@@ -81,7 +81,7 @@ $(tput bold)EXAMPLES$(tput sgr0)
         --output /results/cohort_A \\
         --prefix cohort_A \\
         --ref    /ref/hg19.fasta \\
-        --bed    /panels/141gene_targets.bed
+        --bed    /panels/panel_targets.bed
 
     # Run with gender stratification
     bash cnv_pipeline.sh \\
@@ -89,7 +89,7 @@ $(tput bold)EXAMPLES$(tput sgr0)
         --output  /results/cohort_A \\
         --prefix  cohort_A \\
         --ref     /ref/hg19.fasta \\
-        --bed     /panels/141gene_targets.bed \\
+        --bed     /panels/panel_targets.bed \\
         --genders /data/genders.txt
 
     # With custom thread count and keep BAMs
@@ -98,7 +98,7 @@ $(tput bold)EXAMPLES$(tput sgr0)
         --output  /results/cohort_A \\
         --prefix  cohort_A \\
         --ref     /ref/hg19.fasta \\
-        --bed     /panels/141gene_targets.bed \\
+        --bed     /panels/panel_targets.bed \\
         --genders /data/genders.txt \\
         --threads 12 \\
         --keep-bams

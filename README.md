@@ -206,7 +206,7 @@ Settings are stored in `config.json`. Paths are relative to the project root; ab
 
 `genomeBuild` (`hg19` or `hg38`) is the build of the `ref` FASTA. ClassifyCNV uses the same build, and the interface refuses a run whose panel was built for a different one.
 
-`instBed` is optional. The in-house panel BED is not distributed with the repository. To use the **Institutional panel** option, place your own panel BED at `backend/targets_merged.bed`, or point `instBed` to it. Without it, the other panel options (presets, gene names, BED upload) work as usual.
+`instBed` is optional. The in-house panel BED is not distributed with the repository, and the **Institutional panel** option is shown only when the backend finds this file. To use it, place your own panel BED at `backend/targets_merged.bed`, or point `instBed` to it. Without it, the option is hidden and the other panel options (presets, gene names, BED upload) work as usual.
 
 ## Running the pipeline from the command line
 

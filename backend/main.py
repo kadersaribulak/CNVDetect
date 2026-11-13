@@ -209,10 +209,13 @@ def genes(build:str="hg19"):
 
 @app.get("/api/institutional-bed")
 def institutional_bed():
+    # The in-house BED is optional and not distributed; without it the UI hides the option
     if _INST_BED:
-        regions = len([l for l in _INST_BED.split("\n") if l.strip()])
-        return {"bed": _INST_BED, "regions": regions, "name": "Kurumsal Panel"}
-    return {"bed": "", "regions": 0, "name": "Kurumsal Panel (bulunamadı)"}
+        lines = [l for l in _INST_BED.split("\n") if l.strip()]
+        genes = {l.split("\t")[3].strip() for l in lines if len(l.split("\t")) > 3 and l.split("\t")[3].strip()}
+        return {"available": True, "bed": _INST_BED, "regions": len(lines), "genes": len(genes),
+                "name": "Kurumsal Panel"}
+    return {"available": False, "bed": "", "regions": 0, "genes": 0, "name": "Kurumsal Panel (bulunamadı)"}
 
 @app.post("/api/bed/generate")
 async def bed(payload:dict):

@@ -29,6 +29,8 @@ export default function PanelPage() {
   const [uploadedName,  setUploadedName]  = useState('')
   const [isDragging,    setIsDragging]    = useState(false)
   const [instLoading,   setInstLoading]   = useState(false)
+  // In-house panel BED: only offered when the backend has one (it is not distributed)
+  const [instInfo,      setInstInfo]      = useState(null)  // { regions, genes } or null
   const inputRef  = useRef()
   const dropRef   = useRef()
   const bedReqId  = useRef(0)  // ignore out-of-order BED generation responses
@@ -38,6 +40,12 @@ export default function PanelPage() {
   useEffect(() => {
     axios.get(`${API}/api/genes?build=${genome}`).then(r => setAllGenes(r.data)).catch(() => {})
   }, [genome])
+
+  useEffect(() => {
+    axios.get(`${API}/api/institutional-bed`)
+      .then(({ data }) => { if (data.available) setInstInfo({ regions: data.regions, genes: data.genes }) })
+      .catch(() => {})
+  }, [])
 
   // Gene input handlers
   const handleInput = val => {
@@ -168,8 +176,8 @@ export default function PanelPage() {
   const canNext    = bedText.length > 0 || genes.length > 0 || uploadedBed.length > 0
 
   const MODES = [
-    { id: 'institutional', icon: <Building2 size={15}/>, label: lang==='tr' ? 'Kurumsal Panel' : 'Institutional Panel' },
-    { id: 'preset',        icon: '🧬',                   label: lang==='tr' ? 'Hazır Paneller' : 'Clinical Presets'     },
+    ...(instInfo ? [{ id: 'institutional', icon: <Building2 size={15}/>, label: lang==='tr' ? 'Kurumsal Panel' : 'Institutional Panel' }] : []),
+    { id: 'preset',       icon: '🧬',                   label: lang==='tr' ? 'Hazır Paneller' : 'Clinical Presets'     },
     { id: 'custom',        icon: <Search size={15}/>,    label: lang==='tr' ? 'Gen Ekle'       : 'Add Genes'            },
     { id: 'upload',        icon: <FileUp size={15}/>,    label: lang==='tr' ? 'BED Yükle'      : 'Upload BED'           },
   ]
@@ -213,7 +221,7 @@ export default function PanelPage() {
           </div>
 
           {/* INSTITUTIONAL */}
-          {activeMode === 'institutional' && (
+          {activeMode === 'institutional' && instInfo && (
             <SectionCard>
               <div className={s.instCard}>
                 <div className={s.instIcon}>🏥</div>
@@ -223,8 +231,8 @@ export default function PanelPage() {
                   </div>
                   <div className={s.instDesc}>
                     {lang==='tr'
-                      ? '141 gen · 1929 hedef bölge · hg19'
-                      : '141 genes · 1929 target regions · hg19'}
+                      ? `${instInfo.genes ? `${instInfo.genes} gen · ` : ''}${instInfo.regions} hedef bölge`
+                      : `${instInfo.genes ? `${instInfo.genes} genes · ` : ''}${instInfo.regions} target regions`}
                   </div>
                 </div>
                 <Btn variant="primary" size="md" onClick={loadInstitutional} disabled={instLoading}>
@@ -451,9 +459,13 @@ export default function PanelPage() {
                     ? 'Sol taraftan panel seçin veya BED yükleyin'
                     : 'Select a panel or upload a BED file'}</p>
                   <p className={s.bedEmptyHint}>
-                    {lang==='tr'
-                      ? 'Kurumsal panel, hazır klinik paneller veya kendi BED dosyanız'
-                      : 'Institutional panel, clinical presets, or your own BED file'}
+                    {instInfo
+                      ? (lang==='tr'
+                          ? 'Kurumsal panel, hazır klinik paneller veya kendi BED dosyanız'
+                          : 'Institutional panel, clinical presets, or your own BED file')
+                      : (lang==='tr'
+                          ? 'Hazır klinik paneller, gen listesi veya kendi BED dosyanız'
+                          : 'Clinical presets, a gene list, or your own BED file')}
                   </p>
                 </div>
               )
