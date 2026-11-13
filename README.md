@@ -24,6 +24,8 @@ No matched normal samples are required. The interface is available in English an
 - [Running the pipeline from the command line](#running-the-pipeline-from-the-command-line)
 - [Project structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
+- [Software versions](#software-versions)
+- [Licence](#licence)
 
 ---
 
@@ -39,7 +41,7 @@ No matched normal samples are required. The interface is available in English an
   - Live, per-step progress, tracked separately for males and females
   - Technical log view
   - Safe stop: all child processes are terminated
-- **Consensus CNV calling** — calls made by both CNVkit (flat reference) and ExomeDepth (cohort reference) are reported as high-confidence.
+- **Tiered consensus CNV calling** — CNVkit (flat reference) and ExomeDepth (cohort reference) are run on every sample. Calls supported by both are reported as **HIGH** confidence; strong CNVkit bin-level (bintest) evidence without ExomeDepth support is reported as **MEDIUM**. See [Confidence levels](#confidence-levels).
 - **Automatic classification** — ClassifyCNV assigns ACMG classes (Pathogenic / VUS / Benign …). Results from all groups are merged into a single Excel report.
 - **Results view**
   - Filterable, sortable table
@@ -65,9 +67,8 @@ No matched normal samples are required. The interface is available in English an
 | Component | Notes |
 |---|---|
 | Linux, or Windows + **WSL2** (Ubuntu) | The backend and the pipeline run on Linux |
-| **Python 3.10+** | For the backend |
-| **conda** environment `cnv_pipeline` | With `bwa`, `samtools`, `picard`, `cnvkit`, `r-base`, and the Bioconductor packages `ExomeDepth` and `GenomicRanges` |
-| **ClassifyCNV** | Installed under `tools/ClassifyCNV/` (or `~/ClassifyCNV/`) |
+| **conda** environment `cnv_pipeline` | Created from `environment.yml`, which pins every tool version (see [Software versions](#software-versions)) |
+| **ClassifyCNV** 1.1.1 | Installed separately under `tools/ClassifyCNV/` (or `~/ClassifyCNV/`); see [Licence](#licence) |
 | **Reference genome** | `reference/hg19.fasta`. Missing BWA/samtools/Picard indexes are built automatically on the first run. |
 | **Node.js 18+** | Only for frontend development or Electron |
 | **Docker** | Only for serving the web frontend with Docker |
@@ -81,23 +82,19 @@ No matched normal samples are required. The interface is available in English an
 git clone https://github.com/kadersaribulak/CNVDetect.git
 cd CNVDetect
 
-# 2. Create a conda environment with the pipeline tools
-conda create -n cnv_pipeline -c bioconda -c conda-forge \
-    bwa samtools picard cnvkit r-base bioconductor-exomedepth bioconductor-genomicranges
+# 2. Create the conda environment (pipeline tools + backend, pinned versions)
+conda env create -f environment.yml
 conda activate cnv_pipeline
 
-# 3. Install the backend dependencies (in the same environment)
-pip install -r backend/requirements.txt
-
-# 4. Reference genome
+# 3. Reference genome
 mkdir -p reference
-#   Place hg19.fasta in reference/
+#   Place hg19.fasta in reference/ (set "ref" and "genomeBuild" in config.json for another build)
 
-# 5. ClassifyCNV
+# 4. ClassifyCNV (not redistributed with CNVDetect)
 git clone https://github.com/Genotek/ClassifyCNV.git tools/ClassifyCNV
 #   See ClassifyCNV's own README for setup and resource files
 
-# 6. (Optional) Refresh the full gene coordinate database
+# 5. (Optional) Refresh the full gene coordinate database
 python3 backend/download_genes.py
 ```
 
@@ -147,7 +144,7 @@ The package bundles the backend and the pipeline scripts. Python, the pipeline t
 
 | Step | What to do |
 |---|---|
-| **1. Panel** | Choose the genome build (hg19/hg38). Then use the institutional panel, add a clinical preset, type gene names or upload a BED file. A BED preview is shown on the right. |
+| **1. Panel** | Choose the genome build; it must match `genomeBuild` in `config.json` (hg19 by default), otherwise the run is refused. Then use the institutional panel, add a clinical preset, type gene names or upload a BED file. A BED preview is shown on the right. |
 | **2. Samples** | Optional sex stratification. Sample names are filled in from the FASTQ folder; set Male/Female for each sample or import a TSV. |
 | **3. Run** | Click the **FASTQ Folder** box and select the folder that contains the FASTQ files; the number of files and samples is shown. Enter an output folder name, adjust the thread count and the "Keep BAM files" option if needed, then start. The output folder is created next to the FASTQ folder. |
 | **4. Results** | Load `*_consensus_cnvs.tsv` and `CNV_Final_Summary_Report.tsv`. CNVs are matched to their classification by sample, chromosome, start position and type. |
@@ -170,18 +167,27 @@ R462-POOL-38	Female
 │   ├── qc/                               # flagstat, samtools stats, on-target depth
 │   ├── cnvkit/                           # .cnr, .cns, .call.cns, plots
 │   ├── exomedepth/                       # per-sample ExomeDepth results
-│   ├── <prefix>_consensus_cnvs.tsv       # confirmed by both callers (high confidence)
-│   ├── <prefix>_union_cnvs.tsv           # all calls from both callers
+│   ├── <prefix>_consensus_cnvs.tsv       # HIGH and MEDIUM consensus calls
+│   ├── <prefix>_union_cnvs.tsv           # every call from CNVkit (segments, bintest) and ExomeDepth
 │   └── CNV_Final_Summary_Report.tsv      # ClassifyCNV classification
 ├── <folder>_CNV_Final_Report.xlsx        # combined Excel report for all groups
 └── <folder>_CNV_Final_Report.tsv
 ```
 
-- **Filtering tips:**
-  - ExomeDepth: `BF > 10`
-  - CNVkit: `|log2| > 0.3`
-  - The consensus file contains the most reliable calls.
-- BAM files are deleted at the end of the run unless "Keep BAM files" is selected.
+BAM files are deleted at the end of the run unless "Keep BAM files" is selected.
+
+### Confidence levels
+
+Each row of `<prefix>_consensus_cnvs.tsv` has a `confidence` column:
+
+| Level | Evidence | Rule |
+|---|---|---|
+| **HIGH** | Both callers | A CNVkit segment call and an ExomeDepth call of the same sample and type with ≥ 50% reciprocal overlap, **or** a CNVkit bintest region and an ExomeDepth call with ≥ 30% reciprocal overlap |
+| **MEDIUM** | CNVkit bintest only | ≥ 3 consecutive significant bins (gap ≤ 1 kb), mean \|log2\| ≥ 0.5, seen in ≤ 50% of the samples of the run, and not overlapping a HIGH call of the same sample |
+
+HIGH calls are confirmed by two independent methods. MEDIUM calls rest on strong bin-level evidence from CNVkit alone and should be reviewed (scatter plots, target depth) before they are acted on. Calls supported by only one caller that do not meet the MEDIUM rule appear only in the union file.
+
+No Bayes factor or log2 cut-off is applied to the callers' output when the consensus is built. Suggested extra filters for manual review: ExomeDepth `BF > 10`, CNVkit `|log2| > 0.3`.
 
 ## Configuration
 
@@ -190,12 +196,15 @@ Settings are stored in `config.json`. Paths are relative to the project root; ab
 ```json
 {
   "ref":         "./reference/hg19.fasta",
+  "genomeBuild": "hg19",
   "pipeline":    "./pipeline/cnv_pipeline_last.sh",
   "anno":        "./backend/cnv_anotation.sh",
   "instBed":     "./backend/targets_merged.bed",
   "classifyCNV": "./tools/ClassifyCNV/ClassifyCNV.py"
 }
 ```
+
+`genomeBuild` (`hg19` or `hg38`) is the build of the `ref` FASTA. ClassifyCNV uses the same build, and the interface refuses a run whose panel was built for a different one.
 
 `instBed` is optional. The in-house panel BED is not distributed with the repository. To use the **Institutional panel** option, place your own panel BED at `backend/targets_merged.bed`, or point `instBed` to it. Without it, the other panel options (presets, gene names, BED upload) work as usual.
 
@@ -213,10 +222,12 @@ bash pipeline/cnv_pipeline_last.sh \
     --genders genders.txt \
     --threads 8
 
-bash backend/cnv_anotation.sh /path/to/CNV_output/Male tools/ClassifyCNV/ClassifyCNV.py
+GENOME_BUILD=hg19 bash backend/cnv_anotation.sh /path/to/CNV_output/Male tools/ClassifyCNV/ClassifyCNV.py
 ```
 
 For all options: `bash pipeline/cnv_pipeline_last.sh --help`
+
+**Example panel.** `examples/example_panel_hg19.bed` lists 12 hereditary cancer genes (BRCA1, BRCA2, TP53, MLH1, MSH2, MSH6, PMS2, APC, PTEN, ATM, CHEK2, PALB2) as whole-gene regions with ±50 bp padding, in the same format the BED builder produces. For a real analysis, use the capture design of your panel.
 
 ## Project structure
 
@@ -232,7 +243,9 @@ CNVDetect/
 │   └── cnv_pipeline_last.sh    # BWA → Picard → CNVkit + ExomeDepth → Consensus
 ├── src/                        # React frontend (pages, components, EN/TR translations)
 ├── electron/                   # Desktop shell
-├── config.json                 # Reference / script / tool paths
+├── examples/                   # Example panel BED (hg19)
+├── config.json                 # Reference build, script and tool paths
+├── environment.yml             # Pinned conda environment
 ├── Dockerfile, nginx.conf, docker-compose.yml   # Web frontend
 └── reference/, tools/          # (not in the repo) reference genome and ClassifyCNV
 ```
@@ -247,3 +260,27 @@ CNVDetect/
 | Annotation produces no results | Check that the `classifyCNV` line in the backend startup log shows `✓`. |
 | `$'\r': command not found` | A script has CRLF line endings. The repository's `.gitattributes` prevents this; to fix a file by hand, run `sed -i 's/\r$//' file.sh`. |
 | The WSL / Docker disk keeps growing | Check with `sudo docker system df`; the build cache can be cleared with `sudo docker builder prune`. WSL's `ext4.vhdx` does not shrink by itself when space is freed inside it; compact it with `diskpart` → `compact vdisk`. |
+| "Selected genome does not match the reference genome" | The panel was built for a different build than `genomeBuild` in `config.json`. Choose the same build in the Panel step. |
+
+## Software versions
+
+Versions of the environment used to develop and run CNVDetect 2.0.0 (pinned in `environment.yml`):
+
+| Software | Version |
+|---|---|
+| BWA (BWA-MEM) | 0.7.19 |
+| samtools / htslib | 1.23.1 |
+| Picard | 3.4.0 |
+| CNVkit | 0.9.13 |
+| R | 4.4.3 |
+| ExomeDepth | 1.1.18 |
+| GenomicRanges | 1.58.0 |
+| bedtools | 2.31.1 |
+| ClassifyCNV | 1.1.1 (commit 148757c) |
+| Python | 3.10.20 |
+| FastAPI / uvicorn | 0.136.0 / 0.44.0 |
+| pandas / openpyxl | 2.3.3 / 3.1.5 |
+
+## Licence
+
+ClassifyCNV is distributed by its authors under its own licence, which allows free use for academic instruction and research only and does not allow redistribution. It is therefore not included in this repository and must be installed separately from [Genotek/ClassifyCNV](https://github.com/Genotek/ClassifyCNV); commercial use requires a licence from its authors.

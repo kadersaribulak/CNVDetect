@@ -494,8 +494,9 @@ run_pipeline() {
         samtools flagstat "${FINAL_BAM}" > "${QC_DIR}/${sample}.flagstat.txt"
         samtools stats   "${FINAL_BAM}" > "${QC_DIR}/${sample}.stats.txt"
 
-        samtools depth -b "${TARGET_BED}" "${FINAL_BAM}" \
-            | awk '{sum+=$3; n++} END {print "Mean on-target depth: " sum/n}' \
+        # -a: include zero-coverage target positions so gaps lower the mean
+        samtools depth -a -b "${TARGET_BED}" "${FINAL_BAM}" \
+            | awk '{sum+=$3; n++} END {print "Mean on-target depth: " (n ? sum/n : 0)}' \
             > "${QC_DIR}/${sample}.ontarget_depth.txt"
 
         log "  Done: ${sample}"

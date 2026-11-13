@@ -69,18 +69,27 @@ for TSV_FILE in "${INPUT_DIR}"/*consensus_cnvs*.tsv; do
     SCORE_FILE=$(find "$OUTPUT_FOLDER" \( -name "Scoresheet.txt" -o -name "*.Scores" \) 2>/dev/null | head -n 1)
 
     if [ -n "$SCORE_FILE" ] && [ -f "$SCORE_FILE" ]; then
+        # ClassifyCNV collapses identical variants into one row, so one variant can belong
+        # to several samples: keep every (sample, CN) per variant and emit one row for each.
         awk -F'\t' '
         BEGIN {
-            while ((getline < "'"$MAP_FILE"'") > 0) {
-                sample_map[$1] = $2
-                cn_map[$1] = $3
+            while ((getline line < "'"$MAP_FILE"'") > 0) {
+                split(line, f, "\t")
+                n[f[1]]++
+                samp[f[1], n[f[1]]] = f[2]
+                cnv[f[1], n[f[1]]] = f[3]
             }
         }
         NR > 1 {
             variant_id = $1
-            pool_info = (variant_id in sample_map ? sample_map[variant_id] : "NA")
-            cn_value  = (variant_id in cn_map ? cn_map[variant_id] : "NA")
-            print "'"$BASE_NAME"'" "\t" pool_info "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" cn_value "\t" $6 "\t" $7 "\t" $NF
+            if (variant_id in seen) next
+            seen[variant_id] = 1
+            if (!(variant_id in n)) {
+                print "'"$BASE_NAME"'" "\tNA\t" $2 "\t" $3 "\t" $4 "\t" $5 "\tNA\t" $6 "\t" $7 "\t" $NF
+                next
+            }
+            for (i = 1; i <= n[variant_id]; i++)
+                print "'"$BASE_NAME"'" "\t" samp[variant_id, i] "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" cnv[variant_id, i] "\t" $6 "\t" $7 "\t" $NF
         }' "$SCORE_FILE" >> "$SUMMARY_FILE"
 
         echo "-> $BASE_NAME basariyla islendi."

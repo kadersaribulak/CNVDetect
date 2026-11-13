@@ -1,0 +1,34 @@
+# Conda environment for the CNVDetect pipeline and backend.
+# Versions are those of the environment used to develop and run CNVDetect 2.0.0.
+#   conda env create -f environment.yml
+#   conda activate cnv_pipeline
+# ClassifyCNV is not included (academic-use licence, no redistribution):
+# install it separately under tools/ClassifyCNV/ (see README).
+name: cnv_pipeline
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10.20
+  # Alignment and BAM processing
+  - bwa=0.7.19
+  - samtools=1.23.1
+  - htslib=1.23.1
+  - picard=3.4.0
+  # CNV calling
+  - cnvkit=0.9.13
+  - r-base=4.4.3
+  - r-exomedepth=1.1.18
+  - bioconductor-genomicranges=1.58.0
+  - bioconductor-rsamtools=2.22.0
+  - bioconductor-biostrings=2.74.0
+  # Required by ClassifyCNV
+  - bedtools=2.31.1
+  # Backend
+  - pandas=2.3.3
+  - pip
+  - pip:
+      - fastapi==0.136.0
+      - uvicorn[standard]==0.44.0
+      - python-multipart==0.0.26
+      - openpyxl==3.1.5

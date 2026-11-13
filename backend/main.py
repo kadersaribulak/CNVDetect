@@ -132,10 +132,28 @@ def _load_config():
 
 APP_CONFIG = _load_config()
 
+# Genome build of the configured reference FASTA; also used for ClassifyCNV
+_SUPPORTED_BUILDS = ("hg19", "hg38")
+def _load_genome_build():
+    build = "hg19"
+    if _CONFIG_PATH.exists():
+        try:
+            with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+                build = str(json.load(f).get("genomeBuild") or "hg19").strip().lower()
+        except Exception:
+            pass
+    if build not in _SUPPORTED_BUILDS:
+        print(f"[CNVDetect] ✗ genomeBuild '{build}' not supported, using hg19")
+        build = "hg19"
+    print(f"[CNVDetect] ✓ genomeBuild: {build}")
+    return build
+
+GENOME_BUILD = _load_genome_build()
+
 @app.get("/api/config")
 async def get_config():
-    """Returns resolved app config paths for frontend."""
-    return APP_CONFIG
+    """Returns resolved app config paths (and the reference genome build) for frontend."""
+    return {**APP_CONFIG, "genomeBuild": GENOME_BUILD}
 
 # ── Institutional BED ────────────────────────────────────────────────────────
 _INST_BED_PATH = pathlib.Path(APP_CONFIG["instBed"])
@@ -541,6 +559,7 @@ async def run_pipeline(ws: WebSocket):
         bed_text    = cfg.get("bedText", "")
         genders     = str(cfg.get("genders", "")).strip()
         genders_text = cfg.get("gendersText", "")
+        genome      = str(cfg.get("genome", "") or GENOME_BUILD).strip().lower()
         do_anno     = bool(cfg.get("doAnno", True))
         keep_bams   = bool(cfg.get("keepBams", False))
         try:
@@ -591,6 +610,9 @@ async def run_pipeline(ws: WebSocket):
             errors.append(f"Referans FASTA bulunamadı: {ref}")
         if not os.path.isfile(pipeline):
             errors.append(f"Pipeline scripti bulunamadı: {pipeline}")
+        if genome != GENOME_BUILD:
+            errors.append(f"Seçilen genom ({genome}) referans genomla ({GENOME_BUILD}) uyuşmuyor. "
+                          f"Panel adımında {GENOME_BUILD} seçin veya config.json'da ref ve genomeBuild'i değiştirin.")
         if errors:
             for e in errors:
                 await send({"type": "error", "msg": e})
@@ -699,6 +721,8 @@ async def run_pipeline(ws: WebSocket):
                 'source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate cnv_pipeline; '
                 'fi; exec bash "$0" "$1" "$2"'
             )
+            # Classify against the same build as the reference used for alignment
+            anno_env = {**os.environ, "GENOME_BUILD": GENOME_BUILD}
             for d in anno_dirs:
                 if state["stopped"]:
                     break
@@ -706,6 +730,7 @@ async def run_pipeline(ws: WebSocket):
                 try:
                     state["proc"] = aproc = await asyncio.create_subprocess_exec(
                         "bash", "-c", anno_shell, anno_script, d, classify_py,
+                        env=anno_env,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.STDOUT,
                         **_SESSION_KW,

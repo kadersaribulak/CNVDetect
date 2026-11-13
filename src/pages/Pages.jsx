@@ -348,7 +348,7 @@ export function RunPage() {
       gendersText: useGender && sampleRows.filter(r=>r.id.trim()).length > 0
         ? ['Pool\tGender', ...sampleRows.filter(r=>r.id.trim()).map(r=>`${r.id}\t${r.gender}`)].join('\n')
         : '',
-      doAnno, threads, keepBams,
+      genome, doAnno, threads, keepBams,
     }))
     ws.onmessage = e => {
       try {

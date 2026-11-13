@@ -1,5 +1,6 @@
 {
   "ref":      "./reference/hg19.fasta",
+  "genomeBuild": "hg19",
   "pipeline": "./pipeline/cnv_pipeline_last.sh",
   "anno":     "./backend/cnv_anotation.sh",
   "instBed":  "./backend/targets_merged.bed",
