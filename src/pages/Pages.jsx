@@ -299,7 +299,7 @@ export function RunPage() {
   const INST_BED = appConfig.instBed  || ''
 
   // Resolve which BED to use in pipeline
-  const isInstitutional = !!(bedPath && bedPath.includes('targets_merged'))
+  const isInstitutional = !!(bedPath && bedPath.startsWith('institutional:'))
   const isUploadedBed   = !!(bedPath && bedPath.startsWith('uploaded:'))
   const hasBedContent   = !!(bedText && bedText.length > 10)
 
@@ -511,7 +511,7 @@ export function RunPage() {
                   // 2. Upload edilmiş BED
                   if (bedPath?.startsWith('uploaded:')) return bedPath.replace('uploaded:','')
                   // 3. Kurumsal panel
-                  if (bedPath?.includes('targets_merged')) return lang==='tr'?'Kurumsal':'Institutional'
+                  if (bedPath?.startsWith('institutional:')) return lang==='tr'?'Kurumsal':'Institutional'
                   // 4. Generated panel
                   if (bedPath?.startsWith('generated:')) return lang==='tr'?'Özel Panel':'Custom Panel'
                   // 5. Herhangi bir bedText

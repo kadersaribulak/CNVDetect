@@ -105,7 +105,7 @@ _CONFIG_DEFAULTS = {
     "ref":         "reference/hg19.fasta",
     "pipeline":    "pipeline/cnv_pipeline_last.sh",
     "anno":        "backend/cnv_anotation.sh",
-    "instBed":     "backend/targets_merged.bed",
+    "instBed":     "backend/institutional_panel.bed",
     "classifyCNV": "tools/ClassifyCNV/ClassifyCNV.py",
 }
 

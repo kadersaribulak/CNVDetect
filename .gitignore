@@ -24,5 +24,6 @@ tmp_fastq*/
 .DS_Store
 Thumbs.db
 
-# Institutional panel BED — not published (requires institutional approval)
+# Institutional panel BED - not published (requires institutional approval)
+backend/institutional_panel.bed
 backend/targets_merged.bed

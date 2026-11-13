@@ -32,7 +32,7 @@ No matched normal samples are required. The interface is available in English an
 ## Features
 
 - **Panel / BED builder**
-  - Institutional panel: loads a fixed in-house BED from the server (`backend/targets_merged.bed`, not included in the repository; see [Configuration](#configuration))
+  - Institutional panel: loads a fixed in-house BED from the server (`backend/institutional_panel.bed`, not included in the repository; see [Configuration](#configuration))
   - Clinical preset panels, or a custom panel built from gene names, with automatic BED generation and adjustable padding (hg19 / hg38)
   - Upload your own BED file
 - **Sex stratification** — male and female samples are analysed separately (chrY excluded for females; X/Y excluded in the combined analysis). Sample names are detected automatically from the FASTQ folder.
@@ -199,14 +199,14 @@ Settings are stored in `config.json`. Paths are relative to the project root; ab
   "genomeBuild": "hg19",
   "pipeline":    "./pipeline/cnv_pipeline_last.sh",
   "anno":        "./backend/cnv_anotation.sh",
-  "instBed":     "./backend/targets_merged.bed",
+  "instBed":     "./backend/institutional_panel.bed",
   "classifyCNV": "./tools/ClassifyCNV/ClassifyCNV.py"
 }
 ```
 
 `genomeBuild` (`hg19` or `hg38`) is the build of the `ref` FASTA. ClassifyCNV uses the same build, and the interface refuses a run whose panel was built for a different one.
 
-`instBed` is optional. The in-house panel BED is not distributed with the repository, and the **Institutional panel** option is shown only when the backend finds this file. To use it, place your own panel BED at `backend/targets_merged.bed`, or point `instBed` to it. Without it, the option is hidden and the other panel options (presets, gene names, BED upload) work as usual.
+`instBed` is optional. The in-house panel BED is not distributed with the repository, and the **Institutional panel** option is shown only when the backend finds this file. To offer your institution's fixed panel, save its BED file as `backend/institutional_panel.bed` (or point `instBed` to it) and restart the backend. Without it, the option is hidden and the other panel options (presets, gene names, BED upload) work as usual.
 
 ## Running the pipeline from the command line
 
@@ -238,7 +238,7 @@ CNVDetect/
 │   ├── cnv_anotation.sh        # Classification with ClassifyCNV
 │   ├── download_genes.py       # Builds the gene coordinate DB from UCSC refGene
 │   ├── genes_db.json           # hg19 / hg38 gene coordinates
-│   └── targets_merged.bed      # (not in the repo) optional in-house panel BED
+│   └── institutional_panel.bed # (not in the repo) optional in-house panel BED
 ├── pipeline/
 │   └── cnv_pipeline_last.sh    # BWA → Picard → CNVkit + ExomeDepth → Consensus
 ├── src/                        # React frontend (pages, components, EN/TR translations)

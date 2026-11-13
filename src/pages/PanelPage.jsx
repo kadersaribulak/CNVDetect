@@ -10,7 +10,8 @@ import { API } from '../api'
 import s from './PanelPage.module.css'
 
 // Marker stored in bedPath when the server-side institutional BED is used
-export const INSTITUTIONAL_BED_MARKER = 'institutional:targets_merged'
+// (the backend resolves it to instBed from config.json; it is not a file name)
+export const INSTITUTIONAL_BED_MARKER = 'institutional:panel'
 
 export default function PanelPage() {
   const { genome, setGenome, genes, setGenes, padding, setPadding,
