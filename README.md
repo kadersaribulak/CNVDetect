@@ -283,4 +283,6 @@ Versions of the environment used to develop and run CNVDetect 2.0.0 (pinned in `
 
 ## Licence
 
-ClassifyCNV is distributed by its authors under its own licence, which allows free use for academic instruction and research only and does not allow redistribution. It is therefore not included in this repository and must be installed separately from [Genotek/ClassifyCNV](https://github.com/Genotek/ClassifyCNV); commercial use requires a licence from its authors.
+CNVDetect is released under the [MIT License](LICENSE).
+
+The external tools keep their own licences. ClassifyCNV is distributed by its authors under its own licence, which allows free use for academic instruction and research only and does not allow redistribution. It is therefore not included in this repository and must be installed separately from [Genotek/ClassifyCNV](https://github.com/Genotek/ClassifyCNV); commercial use requires a licence from its authors.

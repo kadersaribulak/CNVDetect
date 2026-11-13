@@ -2,6 +2,7 @@
   "name": "cnvdetect",
   "version": "2.0.0",
   "description": "CNVDetect - Genomik CNV Analiz Platformu",
+  "license": "MIT",
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
