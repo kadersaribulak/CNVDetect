@@ -31,7 +31,9 @@ export default function PanelPage() {
   const [isDragging,    setIsDragging]    = useState(false)
   const [instLoading,   setInstLoading]   = useState(false)
   // In-house panel BED: only offered when the backend has one (it is not distributed)
-  const [instInfo,      setInstInfo]      = useState(null)  // { regions, genes } or null
+  const [instInfo,      setInstInfo]      = useState(null)  // { regions, genes, build } or null
+  // Which genome builds have a reference FASTA on the server ({hg19: true, hg38: false})
+  const [builds,        setBuilds]        = useState(null)
   const inputRef  = useRef()
   const dropRef   = useRef()
   const bedReqId  = useRef(0)  // ignore out-of-order BED generation responses
@@ -44,9 +46,15 @@ export default function PanelPage() {
 
   useEffect(() => {
     axios.get(`${API}/api/institutional-bed`)
-      .then(({ data }) => { if (data.available) setInstInfo({ regions: data.regions, genes: data.genes }) })
+      .then(({ data }) => { if (data.available) setInstInfo({ regions: data.regions, genes: data.genes, build: data.build || 'hg19' }) })
+      .catch(() => {})
+    axios.get(`${API}/api/config`)
+      .then(({ data }) => { if (data.builds) setBuilds(data.builds) })
       .catch(() => {})
   }, [])
+
+  const buildAvailable = b => !builds || builds[b] !== false
+  const instBuildOk    = !!instInfo && instInfo.build === genome
 
   // Gene input handlers
   const handleInput = val => {
@@ -199,13 +207,21 @@ export default function PanelPage() {
           {/* Genome build */}
           <SectionCard title={t.panel.genome} hint={t.panel.genomeHint}>
             <div className={s.genomeBtns}>
-              {['hg19','hg38'].map(b => (
-                <button key={b} className={`${s.gBtn} ${genome===b?s.gActive:''}`}
-                  onClick={() => { setGenome(b); clearPanel() }}>
-                  <span className={s.gName}>{b}</span>
-                  <span className={s.gSub}>{b==='hg19'?'GRCh37':'GRCh38'}</span>
-                </button>
-              ))}
+              {['hg19','hg38'].map(b => {
+                const ok = buildAvailable(b)
+                return (
+                  <button key={b} className={`${s.gBtn} ${genome===b?s.gActive:''}`}
+                    disabled={!ok}
+                    style={ok ? undefined : { opacity: .45, cursor: 'not-allowed' }}
+                    title={ok ? undefined : (lang==='tr'
+                      ? `${b} referans genomu sunucuda yok (config.json)`
+                      : `No ${b} reference genome on the server (config.json)`)}
+                    onClick={() => { if (ok && genome !== b) { setGenome(b); clearPanel() } }}>
+                    <span className={s.gName}>{b}</span>
+                    <span className={s.gSub}>{ok ? (b==='hg19'?'GRCh37':'GRCh38') : (lang==='tr' ? 'referans yok' : 'no reference')}</span>
+                  </button>
+                )
+              })}
             </div>
           </SectionCard>
 
@@ -232,11 +248,18 @@ export default function PanelPage() {
                   </div>
                   <div className={s.instDesc}>
                     {lang==='tr'
-                      ? `${instInfo.genes ? `${instInfo.genes} gen · ` : ''}${instInfo.regions} hedef bölge`
-                      : `${instInfo.genes ? `${instInfo.genes} genes · ` : ''}${instInfo.regions} target regions`}
+                      ? `${instInfo.genes ? `${instInfo.genes} gen · ` : ''}${instInfo.regions} hedef bölge · ${instInfo.build}`
+                      : `${instInfo.genes ? `${instInfo.genes} genes · ` : ''}${instInfo.regions} target regions · ${instInfo.build}`}
                   </div>
+                  {!instBuildOk && (
+                    <div className={s.instDesc} style={{ color: 'var(--del)' }}>
+                      {lang==='tr'
+                        ? `Bu panel ${instInfo.build} koordinatlarında; kullanmak için yukarıdan ${instInfo.build} seçin.`
+                        : `This panel uses ${instInfo.build} coordinates; select ${instInfo.build} above to use it.`}
+                    </div>
+                  )}
                 </div>
-                <Btn variant="primary" size="md" onClick={loadInstitutional} disabled={instLoading}>
+                <Btn variant="primary" size="md" onClick={loadInstitutional} disabled={instLoading || !instBuildOk}>
                   {instLoading
                     ? (lang==='tr' ? 'Yükleniyor...' : 'Loading...')
                     : (uploadedName.includes('Kurumsal')

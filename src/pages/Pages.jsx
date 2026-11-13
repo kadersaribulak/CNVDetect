@@ -295,7 +295,7 @@ export function RunPage() {
 
   // Pipeline/annotation script paths are resolved by the backend from config.json
   // and are never sent from the client.
-  const REF      = appConfig.ref      || ''
+  // The reference FASTA is chosen by the backend from the selected genome build
   const INST_BED = appConfig.instBed  || ''
 
   // Resolve which BED to use in pipeline
@@ -343,7 +343,7 @@ export function RunPage() {
     ws.onopen = () => ws.send(JSON.stringify({
       fastqDir, outputDir: fullOutputDir,
       prefix: prefixWithGender,
-      ref: REF, bed: realBed, bedText: hasBedContent ? bedText : '',
+      bed: realBed, bedText: hasBedContent ? bedText : '',
       genders: (genderPath && !genderPath.startsWith('inline:')) ? genderPath : '',
       gendersText: useGender && sampleRows.filter(r=>r.id.trim()).length > 0
         ? ['Pool\tGender', ...sampleRows.filter(r=>r.id.trim()).map(r=>`${r.id}\t${r.gender}`)].join('\n')

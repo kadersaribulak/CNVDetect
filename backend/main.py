@@ -102,58 +102,110 @@ _APP_ROOT = pathlib.Path(__file__).resolve().parent.parent  # CNVDetect/
 _CONFIG_PATH = _APP_ROOT / "config.json"
 
 _CONFIG_DEFAULTS = {
-    "ref":         "reference/hg19.fasta",
+    "refHg19":     "reference/hg19.fasta",
+    "refHg38":     "reference/hg38.fasta",
     "pipeline":    "pipeline/cnv_pipeline_last.sh",
     "anno":        "backend/cnv_anotation.sh",
     "instBed":     "backend/institutional_panel.bed",
     "classifyCNV": "tools/ClassifyCNV/ClassifyCNV.py",
 }
+_SUPPORTED_BUILDS = ("hg19", "hg38")
+
+def _read_user_config():
+    if not _CONFIG_PATH.exists():
+        return {}
+    try:
+        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[CNVDetect] Could not read config.json, using defaults: {e}")
+        return {}
+
+_USER_CFG = _read_user_config()
 
 def _load_config():
-    """Read config.json (if present) and resolve every path relative to APP_ROOT.
-    Absolute paths in config.json are used as-is — works on any machine."""
+    """Resolve every path in config.json relative to APP_ROOT (absolute paths are used as-is)."""
     raw = dict(_CONFIG_DEFAULTS)
-    if _CONFIG_PATH.exists():
-        try:
-            with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-                user_cfg = json.load(f)
-            raw.update({k: v for k, v in user_cfg.items() if k in _CONFIG_DEFAULTS and v})
-        except Exception as e:
-            print(f"[CNVDetect] Could not read config.json, using defaults: {e}")
+    user = dict(_USER_CFG)
+    # Older config.json: one "ref" plus "genomeBuild" → map it to refHg19 / refHg38
+    if user.get("ref") and not (user.get("refHg19") or user.get("refHg38")):
+        legacy_build = str(user.get("genomeBuild") or "hg19").lower()
+        user["refHg38" if legacy_build == "hg38" else "refHg19"] = user["ref"]
+    raw.update({k: v for k, v in user.items() if k in _CONFIG_DEFAULTS and v})
     cfg = {}
     for k, v in raw.items():
         p = pathlib.Path(v)
         cfg[k] = str(p if p.is_absolute() else (_APP_ROOT / p).resolve())
-        if pathlib.Path(cfg[k]).exists():
-            print(f"[CNVDetect] ✓ {k}: {cfg[k]}")
-        else:
-            print(f"[CNVDetect] ✗ {k} NOT FOUND: {cfg[k]}")
+        mark = "✓" if pathlib.Path(cfg[k]).exists() else "✗ (not found)"
+        print(f"[CNVDetect] {mark} {k}: {cfg[k]}")
     return cfg
 
 APP_CONFIG = _load_config()
 
-# Genome build of the configured reference FASTA; also used for ClassifyCNV
-_SUPPORTED_BUILDS = ("hg19", "hg38")
-def _load_genome_build():
-    build = "hg19"
-    if _CONFIG_PATH.exists():
-        try:
-            with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-                build = str(json.load(f).get("genomeBuild") or "hg19").strip().lower()
-        except Exception:
-            pass
-    if build not in _SUPPORTED_BUILDS:
-        print(f"[CNVDetect] ✗ genomeBuild '{build}' not supported, using hg19")
-        build = "hg19"
-    print(f"[CNVDetect] ✓ genomeBuild: {build}")
-    return build
+# Reference FASTA per genome build; the user picks the build for every run
+REFS = {"hg19": APP_CONFIG["refHg19"], "hg38": APP_CONFIG["refHg38"]}
 
-GENOME_BUILD = _load_genome_build()
+def _available_builds():
+    return {b: os.path.isfile(p) for b, p in REFS.items()}
+
+# Genome build the in-house panel BED is written in (its coordinates are build-specific)
+INST_BED_BUILD = str(_USER_CFG.get("instBedBuild") or "hg19").strip().lower()
+if INST_BED_BUILD not in _SUPPORTED_BUILDS:
+    print(f"[CNVDetect] ✗ instBedBuild '{INST_BED_BUILD}' not supported, using hg19")
+    INST_BED_BUILD = "hg19"
 
 @app.get("/api/config")
 async def get_config():
-    """Returns resolved app config paths (and the reference genome build) for frontend."""
-    return {**APP_CONFIG, "genomeBuild": GENOME_BUILD}
+    """Resolved paths, which genome builds have a reference, and the in-house panel's build."""
+    return {**APP_CONFIG, "builds": _available_builds(), "instBedBuild": INST_BED_BUILD}
+
+# ── Chromosome naming (chr1 vs 1) ───────────────────────────────────────────
+def _ref_uses_chr(ref_path):
+    """True/False if the reference names contigs 'chr1'/'1'; None if it cannot be read."""
+    try:
+        fai = ref_path + ".fai"
+        if os.path.isfile(fai):
+            with open(fai, encoding="utf-8") as f:
+                first = f.readline().split("\t")[0]
+        else:
+            with open(ref_path, encoding="utf-8") as f:
+                first = f.readline().lstrip(">").split()[0]
+        return first.lower().startswith("chr") if first else None
+    except Exception:
+        return None
+
+def _convert_chrom(name, use_chr):
+    n = name.strip()
+    has_chr = n.lower().startswith("chr")
+    if use_chr and not has_chr:
+        return "chrM" if n in ("MT", "M") else "chr" + n
+    if not use_chr and has_chr:
+        core = n[3:]
+        return "MT" if core in ("M", "MT") else core
+    return n
+
+def _bed_matching_reference(bed_path, ref_path):
+    """Return a BED whose chromosome names follow the reference (writes a temp copy only if needed)."""
+    use_chr = _ref_uses_chr(ref_path)
+    if use_chr is None:
+        return bed_path, False
+    with open(bed_path, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    out, changed = [], False
+    for line in lines:
+        if not line.strip() or line.startswith(("#", "track", "browser")):
+            out.append(line); continue
+        parts = line.split("\t")
+        new = _convert_chrom(parts[0], use_chr)
+        if new != parts[0]:
+            parts[0] = new; changed = True
+        out.append("\t".join(parts))
+    if not changed:
+        return bed_path, False
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".bed", delete=False, prefix="cnvdetect_")
+    tmp.write("\n".join(out) + "\n")
+    tmp.close()
+    return tmp.name, True
 
 # ── Institutional BED ────────────────────────────────────────────────────────
 _INST_BED_PATH = pathlib.Path(APP_CONFIG["instBed"])
@@ -214,8 +266,9 @@ def institutional_bed():
         lines = [l for l in _INST_BED.split("\n") if l.strip()]
         genes = {l.split("\t")[3].strip() for l in lines if len(l.split("\t")) > 3 and l.split("\t")[3].strip()}
         return {"available": True, "bed": _INST_BED, "regions": len(lines), "genes": len(genes),
-                "name": "Kurumsal Panel"}
-    return {"available": False, "bed": "", "regions": 0, "genes": 0, "name": "Kurumsal Panel (bulunamadı)"}
+                "build": INST_BED_BUILD, "name": "Kurumsal Panel"}
+    return {"available": False, "bed": "", "regions": 0, "genes": 0, "build": INST_BED_BUILD,
+            "name": "Kurumsal Panel (bulunamadı)"}
 
 @app.post("/api/bed/generate")
 async def bed(payload:dict):
@@ -313,8 +366,11 @@ async def validate_pipeline(payload: dict):
     fastq_dir  = payload.get("fastqDir","")
     output_dir = payload.get("outputDir","")
     bed        = payload.get("bed","")
-    ref        = APP_CONFIG["ref"]
+    genome     = str(payload.get("genome") or "hg19").strip().lower()
+    ref        = REFS.get(genome, "")
     pipeline   = APP_CONFIG["pipeline"]
+    if genome not in _SUPPORTED_BUILDS:
+        errors.append(f"Desteklenmeyen genom: {genome}")
 
     if not fastq_dir:  errors.append("FASTQ dizini belirtilmedi")
     elif not os.path.isabs(fastq_dir): errors.append(f"FASTQ dizini tam yol olmalı: {fastq_dir}")
@@ -553,7 +609,6 @@ async def run_pipeline(ws: WebSocket):
         pipeline    = APP_CONFIG["pipeline"]
         anno_script = APP_CONFIG["anno"]
         classify_py = APP_CONFIG["classifyCNV"]
-        ref         = APP_CONFIG["ref"]
 
         fastq_dir   = str(cfg.get("fastqDir", "")).strip()
         output_dir  = str(cfg.get("outputDir", "")).strip()
@@ -562,7 +617,9 @@ async def run_pipeline(ws: WebSocket):
         bed_text    = cfg.get("bedText", "")
         genders     = str(cfg.get("genders", "")).strip()
         genders_text = cfg.get("gendersText", "")
-        genome      = str(cfg.get("genome", "") or GENOME_BUILD).strip().lower()
+        # The user picks the build per run; the reference FASTA follows from it
+        genome      = str(cfg.get("genome", "") or "hg19").strip().lower()
+        ref         = REFS.get(genome, "")
         do_anno     = bool(cfg.get("doAnno", True))
         keep_bams   = bool(cfg.get("keepBams", False))
         try:
@@ -573,6 +630,7 @@ async def run_pipeline(ws: WebSocket):
         # Only the institutional BED may be referenced by path; anything else is sent as text
         if bed and os.path.realpath(bed) != os.path.realpath(APP_CONFIG["instBed"]):
             bed = ""
+        uses_inst_bed = bool(bed)
         if not bed and bed_text:
             tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".bed", delete=False, prefix="cnvdetect_")
             tmp.write(bed_text if bed_text.endswith("\n") else bed_text + "\n")
@@ -609,17 +667,26 @@ async def run_pipeline(ws: WebSocket):
             errors.append(f"Çıktı klasörü tam yol olmalı: {output_dir or '-'}")
         if not bed:
             errors.append("BED belirtilmedi")
-        if not os.path.isfile(ref):
-            errors.append(f"Referans FASTA bulunamadı: {ref}")
+        if genome not in _SUPPORTED_BUILDS:
+            errors.append(f"Desteklenmeyen genom: {genome} (hg19 veya hg38)")
+        elif not os.path.isfile(ref):
+            key = "refHg38" if genome == "hg38" else "refHg19"
+            errors.append(f"{genome} referans FASTA bulunamadı: {ref} — dosyayı ekleyin veya config.json'da {key} yolunu düzeltin.")
+        if uses_inst_bed and genome != INST_BED_BUILD:
+            errors.append(f"Kurumsal panel {INST_BED_BUILD} koordinatlarında; {genome} ile kullanılamaz. "
+                          f"Panel adımında {INST_BED_BUILD} seçin.")
         if not os.path.isfile(pipeline):
             errors.append(f"Pipeline scripti bulunamadı: {pipeline}")
-        if genome != GENOME_BUILD:
-            errors.append(f"Seçilen genom ({genome}) referans genomla ({GENOME_BUILD}) uyuşmuyor. "
-                          f"Panel adımında {GENOME_BUILD} seçin veya config.json'da ref ve genomeBuild'i değiştirin.")
         if errors:
             for e in errors:
                 await send({"type": "error", "msg": e})
             return
+
+        # BED chromosome names must follow the reference (chr1 vs 1)
+        bed, renamed = _bed_matching_reference(bed, ref)
+        if renamed:
+            tmp_files.append(bed)
+            await send({"type": "info", "msg": f"BED kromozom adları {genome} referansına uyarlandı (chr önekli/öneksiz)."})
 
         cmd = [
             "bash", pipeline,
@@ -725,7 +792,7 @@ async def run_pipeline(ws: WebSocket):
                 'fi; exec bash "$0" "$1" "$2"'
             )
             # Classify against the same build as the reference used for alignment
-            anno_env = {**os.environ, "GENOME_BUILD": GENOME_BUILD}
+            anno_env = {**os.environ, "GENOME_BUILD": genome}
             for d in anno_dirs:
                 if state["stopped"]:
                     break

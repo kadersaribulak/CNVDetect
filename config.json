@@ -1,8 +1,9 @@
 {
-  "ref":      "./reference/hg19.fasta",
-  "genomeBuild": "hg19",
-  "pipeline": "./pipeline/cnv_pipeline_last.sh",
-  "anno":     "./backend/cnv_anotation.sh",
-  "instBed":  "./backend/institutional_panel.bed",
-  "classifyCNV": "./tools/ClassifyCNV/ClassifyCNV.py"
+  "refHg19":      "./reference/hg19.fasta",
+  "refHg38":      "./reference/hg38.fasta",
+  "instBedBuild": "hg19",
+  "pipeline":     "./pipeline/cnv_pipeline_last.sh",
+  "anno":         "./backend/cnv_anotation.sh",
+  "instBed":      "./backend/institutional_panel.bed",
+  "classifyCNV":  "./tools/ClassifyCNV/ClassifyCNV.py"
 }

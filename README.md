@@ -69,7 +69,7 @@ No matched normal samples are required. The interface is available in English an
 | Linux, or Windows + **WSL2** (Ubuntu) | The backend and the pipeline run on Linux |
 | **conda** environment `cnv_pipeline` | Created from `environment.yml`, which pins every tool version (see [Software versions](#software-versions)) |
 | **ClassifyCNV** 1.1.1 | Installed separately under `tools/ClassifyCNV/` (or `~/ClassifyCNV/`); see [Licence](#licence) |
-| **Reference genome** | `reference/hg19.fasta`. Missing BWA/samtools/Picard indexes are built automatically on the first run. |
+| **Reference genome** | `reference/hg19.fasta` and/or `reference/hg38.fasta`; the user picks the build per run. Missing BWA/samtools/Picard indexes are built automatically on the first run (for hg38 this can take more than an hour). |
 | **Node.js 18+** | Only for frontend development or Electron |
 | **Docker** | Only for serving the web frontend with Docker |
 
@@ -88,7 +88,7 @@ conda activate cnv_pipeline
 
 # 3. Reference genome
 mkdir -p reference
-#   Place hg19.fasta in reference/ (set "ref" and "genomeBuild" in config.json for another build)
+#   Place hg19.fasta and/or hg38.fasta in reference/ (paths: refHg19 / refHg38 in config.json)
 
 # 4. ClassifyCNV (not redistributed with CNVDetect)
 git clone https://github.com/Genotek/ClassifyCNV.git tools/ClassifyCNV
@@ -144,7 +144,7 @@ The package bundles the backend and the pipeline scripts. Python, the pipeline t
 
 | Step | What to do |
 |---|---|
-| **1. Panel** | Choose the genome build; it must match `genomeBuild` in `config.json` (hg19 by default), otherwise the run is refused. Then use the institutional panel, add a clinical preset, type gene names or upload a BED file. A BED preview is shown on the right. |
+| **1. Panel** | Choose the genome build (hg19 or hg38); the run uses the matching reference. Then use the institutional panel, add a clinical preset, type gene names or upload a BED file. A BED preview is shown on the right. |
 | **2. Samples** | Optional sex stratification. Sample names are filled in from the FASTQ folder; set Male/Female for each sample or import a TSV. |
 | **3. Run** | Click the **FASTQ Folder** box and select the folder that contains the FASTQ files; the number of files and samples is shown. Enter an output folder name, adjust the thread count and the "Keep BAM files" option if needed, then start. The output folder is created next to the FASTQ folder. |
 | **4. Results** | Load `*_consensus_cnvs.tsv` and `CNV_Final_Summary_Report.tsv`. CNVs are matched to their classification by sample, chromosome, start position and type. |
@@ -195,18 +195,19 @@ Settings are stored in `config.json`. Paths are relative to the project root; ab
 
 ```json
 {
-  "ref":         "./reference/hg19.fasta",
-  "genomeBuild": "hg19",
-  "pipeline":    "./pipeline/cnv_pipeline_last.sh",
-  "anno":        "./backend/cnv_anotation.sh",
-  "instBed":     "./backend/institutional_panel.bed",
-  "classifyCNV": "./tools/ClassifyCNV/ClassifyCNV.py"
+  "refHg19":      "./reference/hg19.fasta",
+  "refHg38":      "./reference/hg38.fasta",
+  "instBedBuild": "hg19",
+  "pipeline":     "./pipeline/cnv_pipeline_last.sh",
+  "anno":         "./backend/cnv_anotation.sh",
+  "instBed":      "./backend/institutional_panel.bed",
+  "classifyCNV":  "./tools/ClassifyCNV/ClassifyCNV.py"
 }
 ```
 
-`genomeBuild` (`hg19` or `hg38`) is the build of the `ref` FASTA. ClassifyCNV uses the same build, and the interface refuses a run whose panel was built for a different one.
+**Genome build (hg19 / hg38).** The user chooses the build for every run in the Panel step. The run aligns against `refHg19` or `refHg38` and ClassifyCNV classifies with the same build. Only one of the two FASTA files is required; a build whose FASTA is missing is shown as unavailable. Chromosome names in the target BED (`chr17` or `17`) are adapted automatically to the naming used by the chosen FASTA. An older `config.json` with a single `ref` (and `genomeBuild`) is still accepted.
 
-`instBed` is optional. The in-house panel BED is not distributed with the repository, and the **Institutional panel** option is shown only when the backend finds this file. To offer your institution's fixed panel, save its BED file as `backend/institutional_panel.bed` (or point `instBed` to it) and restart the backend. Without it, the option is hidden and the other panel options (presets, gene names, BED upload) work as usual.
+`instBed` is optional, and `instBedBuild` is the build its coordinates are in; the panel can only be used with that build. The in-house panel BED is not distributed with the repository, and the **Institutional panel** option is shown only when the backend finds this file. To offer your institution's fixed panel, save its BED file as `backend/institutional_panel.bed` (or point `instBed` to it) and restart the backend. Without it, the option is hidden and the other panel options (presets, gene names, BED upload) work as usual.
 
 ## Running the pipeline from the command line
 
@@ -260,7 +261,8 @@ CNVDetect/
 | Annotation produces no results | Check that the `classifyCNV` line in the backend startup log shows `✓`. |
 | `$'\r': command not found` | A script has CRLF line endings. The repository's `.gitattributes` prevents this; to fix a file by hand, run `sed -i 's/\r$//' file.sh`. |
 | The WSL / Docker disk keeps growing | Check with `sudo docker system df`; the build cache can be cleared with `sudo docker builder prune`. WSL's `ext4.vhdx` does not shrink by itself when space is freed inside it; compact it with `diskpart` → `compact vdisk`. |
-| "Selected genome does not match the reference genome" | The panel was built for a different build than `genomeBuild` in `config.json`. Choose the same build in the Panel step. |
+| "hg38 reference FASTA not found" | Add the FASTA for that build to `reference/` or fix `refHg19` / `refHg38` in `config.json`, then restart the backend. |
+| "The institutional panel is in hg19 coordinates" | The in-house panel can only be used with the build in `instBedBuild`. Choose that build in the Panel step. |
 
 ## Software versions
 

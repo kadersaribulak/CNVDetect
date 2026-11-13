@@ -520,11 +520,11 @@ savefig.bbox: tight
 font.size: 10
 MPLRC
 
-    local ACCESS_BED="${CNVKIT_DIR}/access-hg19.bed"
+    local ACCESS_BED="${CNVKIT_DIR}/access-ref.bed"
     if [[ ! -f "${ACCESS_BED}" ]]; then
         log "Generating access/mappability file..."
         cnvkit.py access "${REF}" \
-            -o "${CNVKIT_DIR}/access-hg19-all.bed" \
+            -o "${CNVKIT_DIR}/access-ref-all.bed" \
             2>&1 | tee -a "${RUN_LOG_DIR}/cnvkit_access.log"
 
         # Derive allowed chromosomes from TARGET_BED so that autosomal
@@ -532,7 +532,7 @@ MPLRC
         local TARGET_CHROMS
         TARGET_CHROMS=$(cut -f1 "${TARGET_BED}" | sort -V | uniq | tr '\n' '|' | sed 's/|$//')
         grep -P "^(${TARGET_CHROMS})\t" \
-            "${CNVKIT_DIR}/access-hg19-all.bed" > "${ACCESS_BED}"
+            "${CNVKIT_DIR}/access-ref-all.bed" > "${ACCESS_BED}"
         log "Filtered access file: $(wc -l < "${ACCESS_BED}") regions (chromosomes: ${TARGET_CHROMS//|/, })"
     fi
 
